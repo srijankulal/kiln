@@ -5,11 +5,145 @@ pub mod image_loader;
 
 use app::{MainWindow, ShellApp};
 use clap::Parser;
+use kiln_input::{GilrsPoller, InputPoller, NavAction};
 use kiln_library::db::LibraryDatabase;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::SystemTime;
+
+pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
+    match action {
+        NavAction::EmergencyAbort => {
+            eprintln!("EMERGENCY ABORT TRIGGERED VIA GAMEPAD CHORD (BACK+START)");
+            std::process::exit(0);
+        }
+        NavAction::NextTab => {
+            let next = (ui.get_selected_tab() + 1) % 7;
+            ui.set_selected_tab(next);
+            ui.set_focused_card_index(0);
+            ui.invoke_change_tab(next);
+        }
+        NavAction::PrevTab => {
+            let prev = (ui.get_selected_tab() + 6) % 7;
+            ui.set_selected_tab(prev);
+            ui.set_focused_card_index(0);
+            ui.invoke_change_tab(prev);
+        }
+        NavAction::Left => {
+            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+                let idx = ui.get_focused_card_index();
+                if idx >= 100 {
+                    let rel = idx - 100;
+                    if rel > 0 {
+                        ui.set_focused_card_index(idx - 1);
+                    }
+                } else if idx > 0 {
+                    ui.set_focused_card_index(idx - 1);
+                }
+            }
+        }
+        NavAction::Right => {
+            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+                let idx = ui.get_focused_card_index();
+                let games_len = ui.get_games().row_count() as i32;
+                let recent_len = ui.get_recent_games().row_count() as i32;
+                if idx >= 100 {
+                    let rel = idx - 100;
+                    if rel + 1 < games_len {
+                        ui.set_focused_card_index(idx + 1);
+                    }
+                } else if idx + 1 < recent_len {
+                    ui.set_focused_card_index(idx + 1);
+                }
+            }
+        }
+        NavAction::Up => {
+            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+                let idx = ui.get_focused_card_index();
+                if idx >= 100 && ui.get_selected_tab() == 0 && ui.get_recent_games().row_count() > 0
+                {
+                    let target = std::cmp::min(
+                        (idx - 100) as usize,
+                        ui.get_recent_games().row_count().saturating_sub(1),
+                    );
+                    ui.set_focused_card_index(target as i32);
+                }
+            }
+        }
+        NavAction::Down => {
+            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+                let idx = ui.get_focused_card_index();
+                if idx < 100 && ui.get_games().row_count() > 0 {
+                    let target =
+                        std::cmp::min(idx as usize, ui.get_games().row_count().saturating_sub(1));
+                    ui.set_focused_card_index(100 + target as i32);
+                }
+            }
+        }
+        NavAction::Select => {
+            if ui.get_show_game_detail() {
+                let sel = ui.get_selected_game();
+                ui.set_show_game_detail(false);
+                ui.invoke_play_game(sel.id);
+            } else if ui.get_show_power_menu() {
+                ui.set_show_power_menu(false);
+                let _ = ui.hide();
+            } else if ui.get_selected_tab() == 6 {
+                let cur = ui.get_trim_tier();
+                ui.invoke_set_trim_tier((cur + 1) % 3);
+            } else {
+                let idx = ui.get_focused_card_index();
+                let item = if idx >= 100 {
+                    let rel = (idx - 100) as usize;
+                    ui.get_games().row_data(rel)
+                } else {
+                    ui.get_recent_games().row_data(idx as usize)
+                };
+                if let Some(game) = item {
+                    ui.set_selected_game(game);
+                    ui.set_show_game_detail(true);
+                }
+            }
+        }
+        NavAction::Back => {
+            if ui.get_show_game_detail() {
+                ui.set_show_game_detail(false);
+            } else if ui.get_show_power_menu() {
+                ui.set_show_power_menu(false);
+            } else {
+                ui.set_show_power_menu(true);
+            }
+        }
+        NavAction::ContextMenu => {
+            let idx = ui.get_focused_card_index();
+            let game_id = if idx >= 100 {
+                let rel = (idx - 100) as usize;
+                ui.get_games().row_data(rel).map(|g| g.id)
+            } else {
+                ui.get_recent_games().row_data(idx as usize).map(|g| g.id)
+            };
+            if let Some(id) = game_id {
+                ui.invoke_toggle_favorite(id);
+            }
+        }
+        NavAction::Options => {
+            ui.invoke_rescan_library();
+        }
+        NavAction::ToggleMouseMode => {
+            let current = ui.get_status_message();
+            if current.starts_with("Mouse Mode") {
+                ui.set_status_message(SharedString::from(""));
+            } else {
+                ui.set_status_message(SharedString::from(
+                    "Mouse Mode: ON (Stick moves cursor, A clicks)",
+                ));
+            }
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -231,12 +365,125 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Keyboard & UI Navigation callbacks
+    let ui_weak_nav = ui.as_weak();
+
+    ui.on_nav_up({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Up, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_down({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Down, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_left({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Left, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_right({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Right, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_select({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Select, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_back({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::Back, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_favorite({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::ContextMenu, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_next_tab({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::NextTab, &ui);
+            }
+        }
+    });
+
+    ui.on_nav_prev_tab({
+        let weak = ui_weak_nav.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                handle_nav_action(NavAction::PrevTab, &ui);
+            }
+        }
+    });
+
+    // Gamepad background polling thread
+    let ui_weak_poll = ui.as_weak();
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    let poller_thread = std::thread::spawn(move || {
+        let mut poller = GilrsPoller::new();
+        while r.load(Ordering::Relaxed) {
+            let now = std::time::Instant::now();
+            let actions = poller.poll_actions(now);
+            for action in actions {
+                if action == NavAction::EmergencyAbort {
+                    eprintln!("EMERGENCY ABORT TRIGGERED VIA GAMEPAD CHORD (BACK+START)");
+                    std::process::exit(0);
+                }
+                let weak = ui_weak_poll.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        handle_nav_action(action, &ui);
+                    }
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    });
+
     // Fullscreen behavior: if not in safe mode, request fullscreen
     if !opts.safe {
         ui.window().set_fullscreen(true);
     }
 
-    ui.run()?;
+    let run_res = ui.run();
+    running.store(false, Ordering::Relaxed);
+    let _ = poller_thread.join();
+    run_res?;
     Ok(())
 }
 
@@ -257,5 +504,33 @@ mod tests {
         let time_str = get_current_time_str();
         assert_eq!(time_str.len(), 5);
         assert!(time_str.contains(':'));
+    }
+
+    #[test]
+    fn test_nav_action_navigation() {
+        let Ok(ui) = MainWindow::new() else {
+            // In headless CI environments without X11 or Wayland, window creation is gracefully skipped
+            return;
+        };
+        ui.set_selected_tab(0);
+        ui.set_focused_card_index(0);
+
+        handle_nav_action(NavAction::NextTab, &ui);
+        assert_eq!(ui.get_selected_tab(), 1);
+
+        handle_nav_action(NavAction::PrevTab, &ui);
+        assert_eq!(ui.get_selected_tab(), 0);
+
+        handle_nav_action(NavAction::ToggleMouseMode, &ui);
+        assert!(ui.get_status_message().contains("Mouse Mode: ON"));
+
+        handle_nav_action(NavAction::ToggleMouseMode, &ui);
+        assert_eq!(ui.get_status_message(), "");
+
+        handle_nav_action(NavAction::Back, &ui);
+        assert!(ui.get_show_power_menu());
+
+        handle_nav_action(NavAction::Back, &ui);
+        assert!(!ui.get_show_power_menu());
     }
 }

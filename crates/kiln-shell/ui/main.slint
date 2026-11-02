@@ -45,27 +45,55 @@ export component MainWindow inherits Window {
     callback toggle_close_launcher();
     callback rescan_library();
     callback power_action(string); // "exit", "sleep", "restart", "shutdown"
+    callback nav_up();
+    callback nav_down();
+    callback nav_left();
+    callback nav_right();
+    callback nav_select();
+    callback nav_back();
+    callback nav_favorite();
+    callback nav_next_tab();
+    callback nav_prev_tab();
 
     // Top Level Key Handling
     forward-focus: main-scope;
 
     main-scope := FocusScope {
         key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                if (root.show_game_detail) {
-                    root.show_game_detail = false;
-                    return accept;
-                }
-                if (root.show_power_menu) {
-                    root.show_power_menu = false;
-                    return accept;
-                }
-                root.show_power_menu = true;
+            if (event.text == Key.Escape || event.text == Key.Backspace) {
+                root.nav_back();
                 return accept;
             }
             if (event.text == Key.Tab) {
-                root.selected_tab = Math.mod(root.selected_tab + 1, 7);
-                root.change_tab(root.selected_tab);
+                root.nav_next_tab();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.nav_left();
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.nav_right();
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.nav_up();
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.nav_down();
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == " ") {
+                root.nav_select();
+                return accept;
+            }
+            if (event.text == "x" || event.text == "X") {
+                root.nav_favorite();
+                return accept;
+            }
+            if (event.text == "y" || event.text == "Y") {
+                root.rescan_library();
                 return accept;
             }
             return reject;

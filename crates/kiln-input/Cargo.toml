@@ -10,6 +10,13 @@ description = "Gamepad XInput poller, navigation routing, and gamepad-as-mouse m
 kiln-core.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+gilrs.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
 
 [dev-dependencies]
 tempfile.workspace = true
