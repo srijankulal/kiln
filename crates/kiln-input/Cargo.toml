@@ -1,0 +1,15 @@
+[package]
+name = "kiln-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Gamepad XInput poller, navigation routing, and gamepad-as-mouse mode"
+
+[dependencies]
+kiln-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

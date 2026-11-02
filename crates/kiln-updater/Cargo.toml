@@ -1,0 +1,12 @@
+[package]
+name = "kiln-updater"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Rollback-capable, minisign-verified updater stub for Kiln"
+
+[dependencies]
+kiln-core.workspace = true
+anyhow.workspace = true
+tokio.workspace = true

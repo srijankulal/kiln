@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kiln-core",
+    "crates/kiln-sysctl",
+    "crates/kiln-library",
+    "crates/kiln-input",
+    "crates/kiln-daemon",
+    "crates/kiln-shell",
+    "crates/kiln-auth",
+    "crates/kiln-updater",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Srijan <owner@kiln>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/srijan/kiln"
+
+[workspace.dependencies]
+kiln-core = { path = "crates/kiln-core" }
+kiln-sysctl = { path = "crates/kiln-sysctl" }
+kiln-library = { path = "crates/kiln-library" }
+kiln-input = { path = "crates/kiln-input" }
+kiln-daemon = { path = "crates/kiln-daemon" }
+kiln-shell = { path = "crates/kiln-shell" }
+kiln-auth = { path = "crates/kiln-auth" }
+kiln-updater = { path = "crates/kiln-updater" }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+anyhow = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+proptest = "1.5"
+tempfile = "3.10"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "unwind"

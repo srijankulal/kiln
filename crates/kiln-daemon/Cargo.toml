@@ -1,0 +1,17 @@
+[package]
+name = "kiln-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Always-on background supervisor daemon for Kiln"
+
+[dependencies]
+kiln-core.workspace = true
+kiln-sysctl.workspace = true
+kiln-input.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true

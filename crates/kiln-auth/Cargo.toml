@@ -1,0 +1,12 @@
+[package]
+name = "kiln-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Lightweight on-demand WebView2 login helper binary for Kiln"
+
+[dependencies]
+kiln-core.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
