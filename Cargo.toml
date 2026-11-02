@@ -16,7 +16,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Srijan <owner@kiln>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/srijan/kiln"
+repository = "https://github.com/srijankulal/kiln"
 
 [workspace.dependencies]
 kiln-core = { path = "crates/kiln-core" }
