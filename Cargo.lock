@@ -2771,8 +2771,12 @@ name = "kiln-auth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "kiln-core",
+ "serde",
+ "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2872,8 +2876,13 @@ name = "kiln-updater"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "kiln-core",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
