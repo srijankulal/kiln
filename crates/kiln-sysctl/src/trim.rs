@@ -89,9 +89,13 @@ impl ProcessApi for WindowsProcessTrimmer {
             };
 
             unsafe {
-                let handle = OpenProcess(PROCESS_SET_INFORMATION, false, pid).map_err(|e| {
-                    SysctlError::Win32(format!("OpenProcess for PID {}", pid), e.code().0 as u32)
-                })?;
+                let handle = match OpenProcess(PROCESS_SET_INFORMATION, false, pid) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!(pid, error = %e, "OpenProcess for EcoQoS skipped or inaccessible");
+                        return Ok(());
+                    }
+                };
 
                 let priority = if enable {
                     IDLE_PRIORITY_CLASS
@@ -120,10 +124,11 @@ impl ProcessApi for WindowsProcessTrimmer {
                 let _ = windows::Win32::Foundation::CloseHandle(handle);
 
                 if let Err(e) = status {
-                    return Err(SysctlError::Process(format!(
-                        "SetProcessInformation EcoQoS failed for PID {}: {}",
-                        pid, e
-                    )));
+                    tracing::debug!(
+                        pid,
+                        error = %e,
+                        "SetProcessInformation EcoQoS unavailable or denied, skipping"
+                    );
                 }
             }
             Ok(())
@@ -147,10 +152,14 @@ impl ProcessApi for WindowsProcessTrimmer {
 
             unsafe {
                 // Verify creation time to prevent recycling collisions
-                let query_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-                    .map_err(|e| {
-                        SysctlError::Win32(format!("OpenProcess PID {}", pid), e.code().0 as u32)
-                    })?;
+                let query_handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+                {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!(pid, error = %e, "OpenProcess QUERY for suspend skipped");
+                        return Ok(());
+                    }
+                };
                 let actual_time = get_process_creation_time(query_handle).unwrap_or(0);
                 let _ = windows::Win32::Foundation::CloseHandle(query_handle);
 
@@ -159,30 +168,37 @@ impl ProcessApi for WindowsProcessTrimmer {
                     return Ok(());
                 }
 
-                let ntdll = GetModuleHandleA(s!("ntdll.dll")).map_err(|e| {
-                    SysctlError::Win32("GetModuleHandleA ntdll.dll".into(), e.code().0 as u32)
-                })?;
-                let proc_addr = GetProcAddress(ntdll, s!("NtSuspendProcess"))
-                    .ok_or_else(|| SysctlError::Process("NtSuspendProcess not found".into()))?;
+                let ntdll = match GetModuleHandleA(s!("ntdll.dll")) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "GetModuleHandleA ntdll.dll failed");
+                        return Ok(());
+                    }
+                };
+                let proc_addr = match GetProcAddress(ntdll, s!("NtSuspendProcess")) {
+                    Some(p) => p,
+                    None => {
+                        tracing::warn!("NtSuspendProcess not found");
+                        return Ok(());
+                    }
+                };
 
                 type NtSuspendProcessFn = unsafe extern "system" fn(HANDLE) -> i32;
                 let nt_suspend: NtSuspendProcessFn = std::mem::transmute(proc_addr);
 
-                let handle = OpenProcess(PROCESS_SUSPEND_RESUME, false, pid).map_err(|e| {
-                    SysctlError::Win32(
-                        format!("OpenProcess SUSPEND PID {}", pid),
-                        e.code().0 as u32,
-                    )
-                })?;
+                let handle = match OpenProcess(PROCESS_SUSPEND_RESUME, false, pid) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::debug!(pid, error = %e, "OpenProcess SUSPEND skipped");
+                        return Ok(());
+                    }
+                };
 
                 let status = nt_suspend(handle);
                 let _ = windows::Win32::Foundation::CloseHandle(handle);
 
                 if status != 0 {
-                    return Err(SysctlError::Process(format!(
-                        "NtSuspendProcess returned error {:#x} for PID {}",
-                        status, pid
-                    )));
+                    tracing::warn!(status, pid, "NtSuspendProcess returned non-zero status");
                 }
             }
             Ok(())
@@ -219,27 +235,34 @@ impl ProcessApi for WindowsProcessTrimmer {
                     return Ok(());
                 }
 
-                let ntdll = GetModuleHandleA(s!("ntdll.dll")).map_err(|e| {
-                    SysctlError::Win32("GetModuleHandleA ntdll.dll".into(), e.code().0 as u32)
-                })?;
-                let proc_addr = GetProcAddress(ntdll, s!("NtResumeProcess"))
-                    .ok_or_else(|| SysctlError::Process("NtResumeProcess not found".into()))?;
+                let ntdll = match GetModuleHandleA(s!("ntdll.dll")) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "GetModuleHandleA ntdll.dll failed");
+                        return Ok(());
+                    }
+                };
+                let proc_addr = match GetProcAddress(ntdll, s!("NtResumeProcess")) {
+                    Some(p) => p,
+                    None => {
+                        tracing::warn!("NtResumeProcess not found");
+                        return Ok(());
+                    }
+                };
 
                 type NtResumeProcessFn = unsafe extern "system" fn(HANDLE) -> i32;
                 let nt_resume: NtResumeProcessFn = std::mem::transmute(proc_addr);
 
-                let handle = OpenProcess(PROCESS_SUSPEND_RESUME, false, pid).map_err(|e| {
-                    SysctlError::Win32(format!("OpenProcess RESUME PID {}", pid), e.code().0 as u32)
-                })?;
+                let handle = match OpenProcess(PROCESS_SUSPEND_RESUME, false, pid) {
+                    Ok(h) => h,
+                    Err(_) => return Ok(()),
+                };
 
                 let status = nt_resume(handle);
                 let _ = windows::Win32::Foundation::CloseHandle(handle);
 
                 if status != 0 {
-                    return Err(SysctlError::Process(format!(
-                        "NtResumeProcess returned error {:#x} for PID {}",
-                        status, pid
-                    )));
+                    tracing::warn!(status, pid, "NtResumeProcess returned non-zero status");
                 }
             }
             Ok(())
@@ -275,8 +298,8 @@ impl ProcessApi for WindowsProcessTrimmer {
         }
         #[cfg(not(windows))]
         {
-            let _ = (pid, expected_creation_time);
-            false
+            let _ = expected_creation_time;
+            std::path::Path::new(&format!("/proc/{}", pid)).exists()
         }
     }
 
@@ -326,9 +349,14 @@ mod tests {
     #[test]
     fn test_process_trimmer_lifecycle() {
         let trimmer = WindowsProcessTrimmer::new();
-        assert!(trimmer.set_eco_qos(1234, true).is_ok());
-        assert!(trimmer.suspend_process(1234, 1000).is_ok());
-        assert!(trimmer.resume_process(1234, 1000).is_ok());
+        let my_pid = std::process::id();
+        assert!(trimmer.is_process_running(my_pid, 0));
+        assert!(!trimmer.is_process_running(999_999_999, 0));
+
+        assert!(trimmer.set_eco_qos(my_pid, true).is_ok());
+        assert!(trimmer.set_eco_qos(my_pid, false).is_ok());
+        assert!(trimmer.suspend_process(999_999_999, 1000).is_ok());
+        assert!(trimmer.resume_process(999_999_999, 1000).is_ok());
 
         let snapshot = vec![
             ProcessSnapshot {

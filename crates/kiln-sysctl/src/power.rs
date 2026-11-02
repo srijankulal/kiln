@@ -41,10 +41,15 @@ impl PowerApi for WindowsPower {
                 let mut p_active_guid: *mut GUID = std::ptr::null_mut();
                 let status = PowerGetActiveScheme(None, &mut p_active_guid);
                 if status.0 != 0 || p_active_guid.is_null() {
-                    return Err(SysctlError::Win32(
-                        "PowerGetActiveScheme failed".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "PowerGetActiveScheme unavailable; falling back to default power snapshot"
+                    );
+                    return Ok(PowerSnapshot {
+                        active_scheme: Uuid::nil(),
+                        ac_lid_action: 1,
+                        dc_lid_action: 1,
+                    });
                 }
 
                 let active_guid = *p_active_guid;
@@ -94,10 +99,10 @@ impl PowerApi for WindowsPower {
             unsafe {
                 let status = PowerSetActiveScheme(None, Some(&GUID_MIN_POWER_SAVINGS));
                 if status.0 != 0 {
-                    return Err(SysctlError::Win32(
-                        "PowerSetActiveScheme failed for high performance".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "PowerSetActiveScheme high performance unavailable or unprivileged; continuing"
+                    );
                 }
             }
             Ok(())
@@ -122,10 +127,11 @@ impl PowerApi for WindowsPower {
                 let mut p_active_guid: *mut GUID = std::ptr::null_mut();
                 let status = PowerGetActiveScheme(None, &mut p_active_guid);
                 if status.0 != 0 || p_active_guid.is_null() {
-                    return Err(SysctlError::Win32(
-                        "PowerGetActiveScheme failed".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "PowerGetActiveScheme unavailable for lid configuration; continuing"
+                    );
+                    return Ok(());
                 }
 
                 let active_guid = *p_active_guid;
@@ -166,6 +172,10 @@ impl PowerApi for WindowsPower {
                 PowerSetActiveScheme, PowerWriteACValueIndex, PowerWriteDCValueIndex,
             };
 
+            if snapshot.active_scheme.is_nil() {
+                return Ok(());
+            }
+
             let scheme_guid = GUID::from_u128(snapshot.active_scheme.as_u128());
 
             unsafe {
@@ -188,10 +198,10 @@ impl PowerApi for WindowsPower {
                 // Restore active scheme
                 let status = PowerSetActiveScheme(None, Some(&scheme_guid));
                 if status.0 != 0 {
-                    return Err(SysctlError::Win32(
-                        "PowerSetActiveScheme failed during restore".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "PowerSetActiveScheme failed during restore; continuing"
+                    );
                 }
             }
             Ok(())

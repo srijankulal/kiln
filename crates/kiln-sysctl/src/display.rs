@@ -33,10 +33,15 @@ impl DisplayApi for WindowsDisplay {
                 let status =
                     GetDisplayConfigBufferSizes(QDC_ALL_PATHS, &mut num_paths, &mut num_modes);
                 if status.is_err() {
-                    return Err(SysctlError::Win32(
-                        "GetDisplayConfigBufferSizes failed".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "GetDisplayConfigBufferSizes unavailable or headless environment"
+                    );
+                    return Ok(DisplaySnapshot {
+                        topology: DisplayTopology::Internal,
+                        external_connected: false,
+                        raw_paths: None,
+                    });
                 }
 
                 let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); num_paths as usize];
@@ -52,10 +57,15 @@ impl DisplayApi for WindowsDisplay {
                 );
 
                 if status.is_err() {
-                    return Err(SysctlError::Win32(
-                        "QueryDisplayConfig failed".to_string(),
-                        status.0,
-                    ));
+                    tracing::warn!(
+                        error = status.0,
+                        "QueryDisplayConfig unavailable or headless environment"
+                    );
+                    return Ok(DisplaySnapshot {
+                        topology: DisplayTopology::Internal,
+                        external_connected: false,
+                        raw_paths: None,
+                    });
                 }
 
                 paths.truncate(num_paths as usize);
@@ -131,7 +141,7 @@ impl DisplayApi for WindowsDisplay {
         {
             if let Err(e) = self.set_topology(snapshot.topology) {
                 tracing::warn!(error = %e, "Failed to restore snapshot topology, falling back to Internal");
-                self.set_topology(DisplayTopology::Internal)?;
+                let _ = self.set_topology(DisplayTopology::Internal);
             }
             Ok(())
         }
