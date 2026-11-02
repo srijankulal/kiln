@@ -1,0 +1,138 @@
+import { Theme } from "theme.slint";
+
+export component GameCard inherits Rectangle {
+    in property <string> title: "Game Title";
+    in property <string> launcher: "Steam";
+    in property <bool> has_poster: false;
+    in property <image> poster;
+    in property <bool> is_favorite: false;
+    in-out property <bool> is_card_focused: false;
+
+    callback clicked();
+    callback detail_requested();
+
+    width: is_card_focused ? 232px : 220px;
+    height: is_card_focused ? 336px : 320px;
+    background: is_card_focused ? Theme.surface-focused : Theme.surface-card;
+    border-radius: 12px;
+    border-width: is_card_focused ? 3px : 1px;
+    border-color: is_card_focused ? Theme.accent-glow : Theme.surface-variant;
+    clip: true;
+
+    animate width, height, border-color, background {
+        duration: 120ms;
+        easing: ease-out;
+    }
+
+    // Main Card Content
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Artwork Container
+        Rectangle {
+            height: parent.height - 76px;
+            clip: true;
+            background: #111622;
+
+            if (root.has_poster): Image {
+                width: 100%;
+                height: 100%;
+                source: root.poster;
+                image-fit: cover;
+            }
+
+            if (!root.has_poster): VerticalLayout {
+                alignment: center;
+                padding: 16px;
+                spacing: 8px;
+
+                Text {
+                    text: root.title;
+                    color: Theme.text-primary;
+                    font-size: Theme.font-body;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+
+            // Favorite star badge
+            if (root.is_favorite): Rectangle {
+                x: parent.width - 38px;
+                y: 10px;
+                width: 28px;
+                height: 28px;
+                border-radius: 14px;
+                background: #000000aa;
+
+                Text {
+                    text: "★";
+                    color: #FFD700;
+                    font-size: 16px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Bottom Metadata Panel
+        Rectangle {
+            height: 76px;
+            background: is_card_focused ? #1E283E : #141A28;
+
+            VerticalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                alignment: center;
+                spacing: 4px;
+
+                // Title
+                Text {
+                    text: root.title;
+                    color: Theme.text-primary;
+                    font-size: Theme.font-small;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                // Launcher Pill
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    Rectangle {
+                        height: 20px;
+                        border-radius: 4px;
+                        background: root.launcher == "Steam" ? Theme.steam-color :
+                                   (root.launcher == "Epic" ? Theme.epic-color :
+                                   (root.launcher == "Xbox" ? Theme.xbox-color : Theme.standalone-color));
+
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            Text {
+                                text: root.launcher;
+                                color: Theme.text-primary;
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Mouse and Focus handling
+    TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.clicked();
+            }
+        }
+    }
+}

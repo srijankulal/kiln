@@ -187,4 +187,77 @@ impl LibraryDatabase {
         )?;
         Ok(())
     }
+
+    pub fn toggle_favorite(&self, id: &str) -> Result<bool> {
+        self.conn.execute(
+            "UPDATE games
+             SET favorite = CASE WHEN favorite = 1 THEN 0 ELSE 1 END
+             WHERE id = ?1",
+            params![id],
+        )?;
+        let is_fav: i32 = self.conn.query_row(
+            "SELECT favorite FROM games WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(is_fav != 0)
+    }
+
+    pub fn get_game(&self, id: &str) -> Result<Option<DiscoveredGame>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, source, install_dir, exe, launch_kind, launch_target,
+                    launcher, artwork_grid, artwork_hero, last_played, playtime_s,
+                    hidden, favorite, manual
+             FROM games
+             WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let source_str: String = row.get(2)?;
+            let kind_str: String = row.get(5)?;
+
+            let source = match source_str.as_str() {
+                "steam" => GameSource::Steam,
+                "epic" => GameSource::Epic,
+                "gog" => GameSource::Gog,
+                "ea" => GameSource::Ea,
+                "ubisoft" => GameSource::Ubisoft,
+                "battlenet" => GameSource::BattleNet,
+                "xbox" => GameSource::XboxMsStore,
+                "manual" => GameSource::Manual,
+                _ => GameSource::Standalone,
+            };
+
+            let launch_kind = match kind_str.as_str() {
+                "uri" => LaunchKind::Uri,
+                "custom" => LaunchKind::Custom,
+                _ => LaunchKind::DirectExe,
+            };
+
+            let hidden_int: i32 = row.get(12)?;
+            let favorite_int: i32 = row.get(13)?;
+            let manual_int: i32 = row.get(14)?;
+
+            Ok(Some(DiscoveredGame {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                source,
+                install_dir: row.get(3)?,
+                exe_path: row.get(4)?,
+                launch_kind,
+                launch_target: row.get(6)?,
+                launcher: row.get(7)?,
+                artwork_grid: row.get(8)?,
+                artwork_hero: row.get(9)?,
+                last_played: row.get(10)?,
+                playtime_seconds: row.get(11)?,
+                is_hidden: hidden_int != 0,
+                is_favorite: favorite_int != 0,
+                is_manual: manual_int != 0,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
 }

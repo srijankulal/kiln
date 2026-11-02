@@ -178,5 +178,19 @@ mod tests {
         let updated = db.list_games().expect("List after update");
         assert_eq!(updated[0].playtime_seconds, 420);
         assert_eq!(updated[0].last_played, Some(1700000000));
+
+        // Toggle favorite
+        let is_fav = db.toggle_favorite("test_game_1").expect("Toggle favorite");
+        assert!(is_fav);
+        let fetched = db
+            .get_game("test_game_1")
+            .expect("Get game")
+            .expect("Game exists");
+        assert!(fetched.is_favorite);
+
+        let is_fav_again = db
+            .toggle_favorite("test_game_1")
+            .expect("Toggle favorite again");
+        assert!(!is_fav_again);
     }
 }

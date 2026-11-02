@@ -16,7 +16,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip
-      - run: cargo install cargo-xwin --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-xwin
       - run: cargo xwin build --release --locked --target x86_64-pc-windows-msvc
       - run: |
           mkdir -p dist

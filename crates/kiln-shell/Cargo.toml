@@ -13,3 +13,9 @@ kiln-input.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+clap.workspace = true
+slint.workspace = true
+image.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
