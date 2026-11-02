@@ -1,0 +1,12 @@
+{
+  "FormatVersion": 0,
+  "AppVersionString": "1.0.16.1",
+  "AppName": "AlanWake2",
+  "CatalogItemId": "5280b2a755be4c47b59ef9fc7c34d404",
+  "CatalogNamespace": "c92842d0016e4531818d2d6c1c8f4201",
+  "DisplayName": "Alan Wake 2",
+  "InstallationGuid": "F8889999-AAAA-BBBB-CCCC-DDDDDDDDDDDD",
+  "InstallLocation": "D:\\Games\\Epic\\AlanWake2",
+  "LaunchExecutable": "AlanWake2.exe",
+  "bIsApplication": true
+}

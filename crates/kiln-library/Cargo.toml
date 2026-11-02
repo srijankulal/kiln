@@ -12,9 +12,15 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
 rusqlite.workspace = true
 image.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[[bin]]
+name = "kiln-scan"
+path = "src/bin/kiln-scan.rs"
