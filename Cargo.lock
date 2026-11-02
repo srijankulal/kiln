@@ -2792,13 +2792,19 @@ name = "kiln-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "kiln-core",
  "kiln-input",
  "kiln-sysctl",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
+ "windows 0.58.0",
 ]
 
 [[package]]

@@ -19,6 +19,7 @@ pub fn can_transition(from: ModeState, to: ModeState) -> bool {
         // Normal entry flow
         (Desktop, Entering) => true,
         (Entering, ConfirmingDisplay { .. }) => true,
+        (Entering, GameMode) => true,
         (ConfirmingDisplay { .. }, GameMode) => true,
 
         // Launch and InGame cycle
