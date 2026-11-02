@@ -1,7 +1,10 @@
 name: release
 on:
   push:
-    tags: ['v*']
+    tags:
+      - '0.*'
+      - 'v0.*'
+      - 'v*'
 permissions:
   contents: write
 env:
@@ -15,7 +18,7 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip libfontconfig1-dev libfreetype6-dev pkg-config
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-xwin
@@ -26,6 +29,6 @@ jobs:
           cp -r scripts dist/scripts || true
           cd dist && zip -r ../kiln-${GITHUB_REF_NAME}-windows-x64.zip . && cd ..
           sha256sum kiln-*.zip > SHA256SUMS.txt
-      - run: gh release create ${GITHUB_REF_NAME} kiln-*.zip SHA256SUMS.txt --generate-notes
+      - run: gh release create ${GITHUB_REF_NAME} kiln-*.zip SHA256SUMS.txt --title "Kiln ${GITHUB_REF_NAME}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
