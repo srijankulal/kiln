@@ -14,6 +14,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+pub fn sync_selected_game(ui: &MainWindow) {
+    let idx = ui.get_focused_card_index();
+    let item = if idx >= 100 {
+        let rel = (idx - 100) as usize;
+        ui.get_games().row_data(rel)
+    } else {
+        ui.get_recent_games().row_data(idx as usize)
+    };
+    if let Some(game) = item {
+        ui.set_selected_game(game);
+    } else if ui.get_games().row_count() > 0 {
+        if let Some(first) = ui.get_games().row_data(0) {
+            ui.set_selected_game(first);
+        }
+    }
+}
+
 pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
     match action {
         NavAction::EmergencyAbort => {
@@ -25,12 +42,14 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
             ui.set_selected_tab(next);
             ui.set_focused_card_index(0);
             ui.invoke_change_tab(next);
+            sync_selected_game(ui);
         }
         NavAction::PrevTab => {
             let prev = (ui.get_selected_tab() + 6) % 7;
             ui.set_selected_tab(prev);
             ui.set_focused_card_index(0);
             ui.invoke_change_tab(prev);
+            sync_selected_game(ui);
         }
         NavAction::Left => {
             if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
@@ -43,6 +62,7 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
                 } else if idx > 0 {
                     ui.set_focused_card_index(idx - 1);
                 }
+                sync_selected_game(ui);
             }
         }
         NavAction::Right => {
@@ -58,6 +78,7 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
                 } else if idx + 1 < recent_len {
                     ui.set_focused_card_index(idx + 1);
                 }
+                sync_selected_game(ui);
             }
         }
         NavAction::Up => {
@@ -71,6 +92,7 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
                     );
                     ui.set_focused_card_index(target as i32);
                 }
+                sync_selected_game(ui);
             }
         }
         NavAction::Down => {
@@ -81,6 +103,7 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
                         std::cmp::min(idx as usize, ui.get_games().row_count().saturating_sub(1));
                     ui.set_focused_card_index(100 + target as i32);
                 }
+                sync_selected_game(ui);
             }
         }
         NavAction::Select => {
@@ -277,6 +300,7 @@ fn main() -> anyhow::Result<()> {
     let (initial_games, initial_recent) = app.load_games(0)?;
     ui.set_games(ModelRc::new(VecModel::from(initial_games)));
     ui.set_recent_games(ModelRc::new(VecModel::from(initial_recent)));
+    sync_selected_game(&ui);
     ui.set_clock_time(SharedString::from(get_current_time_str()));
     ui.set_display_info(SharedString::from("TV: 3840x2160 @ 120Hz [HDR]"));
 
@@ -321,6 +345,7 @@ fn main() -> anyhow::Result<()> {
             if let Ok((games, recent)) = app_tab.load_games(tab) {
                 ui.set_games(ModelRc::new(VecModel::from(games)));
                 ui.set_recent_games(ModelRc::new(VecModel::from(recent)));
+                sync_selected_game(&ui);
             }
         }
     });

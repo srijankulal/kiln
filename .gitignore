@@ -4,3 +4,4 @@
 session.json
 *.log
 .cargo/
+.agents/

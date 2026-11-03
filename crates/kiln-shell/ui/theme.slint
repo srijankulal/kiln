@@ -1,30 +1,54 @@
 // Theme definitions for Kiln 10-foot TV UI
 
 export global Theme {
-    out property <color> background: #0A0D14;
-    out property <color> surface: #141A28;
-    out property <color> surface-variant: #1C2438;
-    out property <color> surface-focused: #25314C;
-    out property <color> surface-card: #161D2E;
+    // Deep atmospheric background & surfaces
+    out property <color> background: #07090E;
+    out property <color> surface: #0F1524;
+    out property <color> surface-variant: #182238;
+    out property <color> surface-focused: #1F2D4A;
+    out property <color> surface-card: #121929;
+    out property <color> surface-glass: #0C1220E6;
     
+    // Borders
+    out property <color> border-subtle: #1E2B45;
+    out property <color> border-highlight: #33466E;
+
+    // Glowing accents
     out property <color> accent: #00D2FF;
-    out property <color> accent-glow: #00E5FF;
-    out property <color> accent-warm: #FF6B4A;
+    out property <color> accent-glow: #00F5FF;
+    out property <color> accent-secondary: #6366F1;
+    out property <color> accent-warm: #FF5533;
+    out property <color> accent-gold: #FBBF24;
     
+    // Text hierarchy
     out property <color> text-primary: #FFFFFF;
     out property <color> text-secondary: #94A3B8;
     out property <color> text-muted: #64748B;
     
+    // Launchers
     out property <color> steam-color: #1A78C2;
-    out property <color> epic-color: #313131;
+    out property <color> epic-color: #2D3748;
     out property <color> xbox-color: #107C10;
     out property <color> standalone-color: #8B5CF6;
+    out property <color> gog-color: #7C3AED;
 
-    out property <length> safe-margin-h: 80px;
-    out property <length> safe-margin-v: 44px;
+    // Controller Buttons (Xbox standard colorway)
+    out property <color> btn-a: #10B981;
+    out property <color> btn-b: #EF4444;
+    out property <color> btn-x: #3B82F6;
+    out property <color> btn-y: #F59E0B;
+    out property <color> btn-bumper: #334155;
+    out property <color> btn-system: #475569;
 
-    out property <length> font-headline: 42px;
-    out property <length> font-title: 32px;
-    out property <length> font-body: 26px;
-    out property <length> font-small: 20px;
+    // 10-Foot Safe margins (TV overscan)
+    out property <length> safe-margin-h: 72px;
+    out property <length> safe-margin-v: 40px;
+
+    // Typography
+    out property <length> font-hero: 38px;
+    out property <length> font-headline: 28px;
+    out property <length> font-title: 22px;
+    out property <length> font-body: 17px;
+    out property <length> font-small: 14px;
+    out property <length> font-badge: 11px;
 }
