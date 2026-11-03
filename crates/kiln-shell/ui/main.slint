@@ -1297,7 +1297,10 @@ export component MainWindow inherits Window {
         Rectangle {
             width: 820px;
             height: 490px;
-            border-radius: 20px;
+            border-radius: Theme.radius-xl + 6px;
+            drop-shadow-blur: Theme.e3-blur;
+            drop-shadow-offset-y: Theme.e3-offset;
+            drop-shadow-color: Theme.e3-color;
             background: @linear-gradient(135deg, #111A2E 0%, #0B1120 100%);
             border-width: 2px;
             border-color: Theme.accent;
@@ -1539,7 +1542,10 @@ export component MainWindow inherits Window {
         Rectangle {
             width: 520px;
             height: 420px;
-            border-radius: 20px;
+            border-radius: Theme.radius-xl + 6px;
+            drop-shadow-blur: Theme.e3-blur;
+            drop-shadow-offset-y: Theme.e3-offset;
+            drop-shadow-color: Theme.e3-color;
             background: @linear-gradient(135deg, #111A2E 0%, #0B1120 100%);
             border-width: 2px;
             border-color: Theme.accent-warm;
