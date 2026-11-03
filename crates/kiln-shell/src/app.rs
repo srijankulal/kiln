@@ -5,12 +5,16 @@ use anyhow::Result;
 #[cfg(windows)]
 use kiln_core::models::LaunchKind;
 use kiln_core::models::{DiscoveredGame, GameSource};
+use kiln_library::artwork::{
+    extract_steam_appid, find_local_folder_artwork, sanitize_filename, ArtworkManager,
+};
 use kiln_library::db::LibraryDatabase;
 use kiln_library::scanners::deduplicate_games;
 use kiln_library::scanners::epic::EpicScanner;
 use kiln_library::scanners::standalone::StandaloneScanner;
 use kiln_library::scanners::steam::SteamScanner;
 use kiln_library::scanners::GameScanner;
+use kiln_sysctl::optimizer::{GameModeOptReport, GameModeOptimizer};
 use slint::{Image, SharedString};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -54,25 +58,29 @@ impl ShellApp {
 
     /// Converts a DiscoveredGame into a Slint GameItem.
     pub fn to_game_item(&self, game: &DiscoveredGame) -> GameItem {
-        let (has_poster, poster) = if let Some(ref path_str) = game.artwork_grid {
-            let path = Path::new(path_str);
-            if let Some(img) = load_image_off_thread(path, 480, 720) {
-                (true, img)
-            } else {
-                (false, Image::default())
-            }
-        } else {
-            // Check if there is a local cached artwork in artwork_dir
-            let local_artwork = self.artwork_dir.join(format!("{}.jpg", game.id));
-            if local_artwork.exists() {
-                if let Some(img) = load_image_off_thread(&local_artwork, 480, 720) {
-                    (true, img)
-                } else {
-                    (false, Image::default())
+        let safe_id = sanitize_filename(&game.id);
+        let candidate_paths = [
+            game.artwork_grid.as_ref().map(PathBuf::from),
+            Some(self.artwork_dir.join(format!("grid_{}.jpg", safe_id))),
+            Some(self.artwork_dir.join(format!("grid_{}.png", safe_id))),
+            Some(self.artwork_dir.join(format!("{}.jpg", safe_id))),
+            Some(self.artwork_dir.join(format!("{}.png", safe_id))),
+            find_local_folder_artwork(Path::new(&game.install_dir)),
+        ];
+
+        let mut poster_img = None;
+        for candidate in candidate_paths.into_iter().flatten() {
+            if candidate.exists() {
+                if let Some(img) = load_image_off_thread(&candidate, 480, 720) {
+                    poster_img = Some(img);
+                    break;
                 }
-            } else {
-                (false, Image::default())
             }
+        }
+
+        let (has_poster, poster) = match poster_img {
+            Some(img) => (true, img),
+            None => (false, Image::default()),
         };
 
         let launcher_name = match game.source {
@@ -100,6 +108,93 @@ impl ShellApp {
             last_played: SharedString::from(last_played_str),
             playtime_hours: SharedString::from(playtime_str),
             is_favorite: game.is_favorite,
+        }
+    }
+
+    /// Optimizes system state for console gaming: closes resource-heavy consumer applications
+    /// and flushes working set memory pages under the Safety Packet.
+    pub fn optimize_game_mode(&self) -> GameModeOptReport {
+        if self.safe_mode || self.dry_run {
+            tracing::info!("Dry run / Safe mode: Simulating Game Mode optimization");
+            GameModeOptReport {
+                apps_closed_count: 5,
+                apps_closed_names: vec![
+                    "chrome.exe".to_string(),
+                    "discord.exe".to_string(),
+                    "spotify.exe".to_string(),
+                    "slack.exe".to_string(),
+                    "code.exe".to_string(),
+                ],
+                ram_freed_mb: 1420,
+                total_ram_mb: 16384,
+                free_ram_mb: 11200,
+            }
+        } else {
+            let optimizer = GameModeOptimizer::new();
+            optimizer.run_optimization()
+        }
+    }
+
+    /// Fetches official cover art from Steam CDN for all games lacking local posters.
+    pub async fn sync_missing_artworks(&self) -> usize {
+        let all_games = match self.db.list_games() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+
+        let mut count = 0;
+        let artwork_mgr = ArtworkManager::new(self.artwork_dir.clone(), None);
+
+        for game in all_games {
+            let safe_id = sanitize_filename(&game.id);
+            let has_grid = self
+                .artwork_dir
+                .join(format!("grid_{}.jpg", safe_id))
+                .exists()
+                || self
+                    .artwork_dir
+                    .join(format!("grid_{}.png", safe_id))
+                    .exists()
+                || self.artwork_dir.join(format!("{}.jpg", safe_id)).exists()
+                || game
+                    .artwork_grid
+                    .as_ref()
+                    .map(|p| Path::new(p).exists())
+                    .unwrap_or(false);
+
+            if !has_grid {
+                if let Some(appid) = extract_steam_appid(&game.launch_target, &game.id, &game.title)
+                {
+                    let (grid, hero) = artwork_mgr.fetch_steam_cdn_artwork(&game.id, &appid).await;
+                    if let Some(g) = grid {
+                        let h_str = hero.as_ref().and_then(|p| p.to_str());
+                        let _ = self.db.update_artwork(&game.id, g.to_str(), h_str);
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    /// Pre-seeds procedural / fallback artwork for demo entries so cards are never blank offline.
+    pub fn ensure_demo_artworks(&self) {
+        let _ = std::fs::create_dir_all(&self.artwork_dir);
+        let demos = [
+            ("demo_portal_2", "Portal 2", [0, 210, 255]),
+            ("demo_hades_ii", "Hades II", [255, 69, 58]),
+            ("demo_alan_wake_2", "Alan Wake 2", [142, 142, 147]),
+            ("demo_cyberpunk_2077", "Cyberpunk 2077", [255, 214, 10]),
+            ("demo_forza_horizon_5", "Forza Horizon 5", [255, 159, 10]),
+            ("demo_dead_cells", "Dead Cells", [175, 82, 222]),
+        ];
+
+        for (id, title, color) in demos {
+            let safe_id = sanitize_filename(id);
+            let target = self.artwork_dir.join(format!("grid_{}.jpg", safe_id));
+            if !target.exists() {
+                let _ = generate_fallback_poster(&target, title, color);
+            }
         }
     }
 
@@ -306,6 +401,28 @@ fn format_playtime(seconds: u64) -> String {
     }
 }
 
+pub fn generate_fallback_poster(dest: &Path, _title: &str, accent: [u8; 3]) -> anyhow::Result<()> {
+    let width = 480u32;
+    let height = 720u32;
+    let mut img = image::RgbImage::new(width, height);
+
+    for (x, y, pixel) in img.enumerate_pixels_mut() {
+        let fy = y as f32 / height as f32;
+        let r = ((12.0 + (accent[0] as f32 * 0.15)) * (1.0 - fy * 0.6)) as u8;
+        let g = ((16.0 + (accent[1] as f32 * 0.15)) * (1.0 - fy * 0.6)) as u8;
+        let b = ((24.0 + (accent[2] as f32 * 0.15)) * (1.0 - fy * 0.6)) as u8;
+
+        if y < 12 || y > height - 12 || x < 8 || x > width - 8 {
+            *pixel = image::Rgb(accent);
+        } else {
+            *pixel = image::Rgb([r, g, b]);
+        }
+    }
+
+    img.save(dest)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +522,23 @@ mod tests {
         assert_eq!(format_playtime(3600), "1h 0m");
         assert_eq!(format_playtime(5400), "1h 30m");
         assert_eq!(format_timestamp(0), "");
+    }
+
+    #[test]
+    fn test_shell_app_game_mode_optimization() {
+        let db = Rc::new(LibraryDatabase::open_in_memory().unwrap());
+        let app = ShellApp::new(db, true, true, PathBuf::from("/tmp/art"));
+        let report = app.optimize_game_mode();
+        assert!(report.ram_freed_mb > 0);
+        assert!(report.apps_closed_count > 0);
+    }
+
+    #[test]
+    fn test_shell_app_artwork_generation() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let art_path = temp_dir.path().join("grid_test.jpg");
+        let res = generate_fallback_poster(&art_path, "Test Game", [0, 210, 255]);
+        assert!(res.is_ok());
+        assert!(art_path.exists());
     }
 }

@@ -10,12 +10,16 @@ description = "Fullscreen 10-foot TV UI for Kiln"
 kiln-core.workspace = true
 kiln-library.workspace = true
 kiln-input.workspace = true
+kiln-sysctl.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 clap.workspace = true
 slint.workspace = true
 image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true

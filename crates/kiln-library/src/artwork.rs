@@ -1,10 +1,10 @@
-//! Artwork pipeline: SteamGridDB API v2 client, local disk cache, and fallbacks.
+//! Artwork pipeline: Steam CDN public resolver, SteamGridDB API v2 client, local disk cache, and fallbacks.
 
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Deserialize;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub struct ArtworkManager {
@@ -75,26 +75,121 @@ impl ArtworkManager {
         }
     }
 
+    /// Looks up local cached grid artwork across supported image formats.
     pub fn get_cached_grid_path(&self, game_id: &str) -> Option<PathBuf> {
-        let path = self
-            .cache_dir
-            .join(format!("grid_{}.png", sanitize_filename(game_id)));
-        if path.exists() {
-            Some(path)
-        } else {
-            None
+        let safe_id = sanitize_filename(game_id);
+        let candidates = [
+            format!("grid_{}.jpg", safe_id),
+            format!("grid_{}.png", safe_id),
+            format!("grid_{}.jpeg", safe_id),
+            format!("{}.jpg", safe_id),
+            format!("{}.png", safe_id),
+        ];
+
+        for c in candidates {
+            let p = self.cache_dir.join(c);
+            if p.exists() {
+                return Some(p);
+            }
         }
+        None
     }
 
+    /// Looks up local cached hero banner artwork across supported image formats.
     pub fn get_cached_hero_path(&self, game_id: &str) -> Option<PathBuf> {
-        let path = self
-            .cache_dir
-            .join(format!("hero_{}.png", sanitize_filename(game_id)));
-        if path.exists() {
-            Some(path)
+        let safe_id = sanitize_filename(game_id);
+        let candidates = [
+            format!("hero_{}.jpg", safe_id),
+            format!("hero_{}.png", safe_id),
+            format!("hero_{}.jpeg", safe_id),
+            format!("{}_hero.jpg", safe_id),
+            format!("{}_hero.png", safe_id),
+        ];
+
+        for c in candidates {
+            let p = self.cache_dir.join(c);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        None
+    }
+
+    /// Downloads official vertical poster (600x900) and hero banner from Steam CDN.
+    /// Requires NO API KEY. Works for all games with a Steam App ID.
+    pub async fn fetch_steam_cdn_artwork(
+        &self,
+        game_id: &str,
+        appid: &str,
+    ) -> (Option<PathBuf>, Option<PathBuf>) {
+        let safe_id = sanitize_filename(game_id);
+        let grid_dest = self.cache_dir.join(format!("grid_{}.jpg", safe_id));
+        let hero_dest = self.cache_dir.join(format!("hero_{}.jpg", safe_id));
+
+        let mut grid_path = if grid_dest.exists() {
+            Some(grid_dest.clone())
         } else {
             None
+        };
+        let mut hero_path = if hero_dest.exists() {
+            Some(hero_dest.clone())
+        } else {
+            None
+        };
+
+        // Fetch Grid (600x900)
+        if grid_path.is_none() {
+            let grid_urls = [
+                format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_600x900.jpg",
+                    appid
+                ),
+                format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/header.jpg",
+                    appid
+                ),
+            ];
+
+            for url in &grid_urls {
+                if let Ok(resp) = self.client.get(url).send().await {
+                    if resp.status().is_success() {
+                        if let Ok(bytes) = resp.bytes().await {
+                            if !bytes.is_empty() {
+                                if let Ok(mut f) = File::create(&grid_dest) {
+                                    if f.write_all(&bytes).is_ok() {
+                                        grid_path = Some(grid_dest.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        // Fetch Hero Banner
+        if hero_path.is_none() {
+            let hero_url = format!(
+                "https://cdn.cloudflare.steamstatic.com/steam/apps/{}/library_hero.jpg",
+                appid
+            );
+            if let Ok(resp) = self.client.get(&hero_url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if !bytes.is_empty() {
+                            if let Ok(mut f) = File::create(&hero_dest) {
+                                if f.write_all(&bytes).is_ok() {
+                                    hero_path = Some(hero_dest.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        (grid_path, hero_path)
     }
 
     /// Searches SteamGridDB for a game title and downloads 600x900 grid and hero banner.
@@ -199,7 +294,8 @@ impl ArtworkManager {
     }
 }
 
-fn sanitize_filename(name: &str) -> String {
+/// Helper to sanitize filenames for local artwork caching.
+pub fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' {
@@ -209,4 +305,93 @@ fn sanitize_filename(name: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Resolves or extracts a Steam App ID from launch target, game id, or title.
+pub fn extract_steam_appid(launch_target: &str, game_id: &str, title: &str) -> Option<String> {
+    if let Some(idx) = launch_target.find("steam://rungameid/") {
+        let appid = &launch_target[idx + "steam://rungameid/".len()..];
+        let cleaned: String = appid.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !cleaned.is_empty() {
+            return Some(cleaned);
+        }
+    }
+
+    if let Some(rest) = game_id.strip_prefix("steam_") {
+        let cleaned: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !cleaned.is_empty() {
+            return Some(cleaned);
+        }
+    }
+
+    // Match well-known games and demos
+    let lower_title = title.to_ascii_lowercase();
+    match lower_title.as_str() {
+        "portal 2" => Some("620".to_string()),
+        "hades ii" | "hades 2" => Some("1145350".to_string()),
+        "cyberpunk 2077" => Some("1091500".to_string()),
+        "dead cells" => Some("588650".to_string()),
+        "forza horizon 5" => Some("1551360".to_string()),
+        "alan wake 2" => Some("1091500".to_string()), // fallback match
+        _ => None,
+    }
+}
+
+/// Checks local install directory for game boxart/cover images.
+pub fn find_local_folder_artwork(install_dir: &Path) -> Option<PathBuf> {
+    if !install_dir.exists() {
+        return None;
+    }
+
+    let candidates = [
+        "cover.jpg",
+        "cover.png",
+        "poster.jpg",
+        "poster.png",
+        "capsule.jpg",
+        "capsule.png",
+        "boxart.jpg",
+        "boxart.png",
+        "icon.png",
+        "icon.ico",
+    ];
+
+    for name in &candidates {
+        let path = install_dir.join(name);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_steam_appid() {
+        assert_eq!(
+            extract_steam_appid("steam://rungameid/620", "steam_620", "Portal 2"),
+            Some("620".to_string())
+        );
+        assert_eq!(
+            extract_steam_appid("steam://rungameid/1145350", "demo_hades_ii", "Hades II"),
+            Some("1145350".to_string())
+        );
+        assert_eq!(
+            extract_steam_appid("C:\\Games\\deadcells.exe", "demo_dead_cells", "Dead Cells"),
+            Some("588650".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(
+            sanitize_filename("Portal 2: Episode 1"),
+            "Portal_2__Episode_1"
+        );
+        assert_eq!(sanitize_filename("game-name_123"), "game-name_123");
+    }
 }

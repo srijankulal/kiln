@@ -2850,8 +2850,10 @@ dependencies = [
  "kiln-core",
  "kiln-input",
  "kiln-library",
+ "kiln-sysctl",
  "slint",
  "slint-build",
+ "tempfile",
  "tokio",
  "tracing",
 ]

@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod display;
+pub mod optimizer;
 pub mod power;
 pub mod shell;
 pub mod trim;
