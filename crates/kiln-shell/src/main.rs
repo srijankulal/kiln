@@ -15,14 +15,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 pub fn sync_selected_game(ui: &MainWindow) {
-    let idx = ui.get_focused_card_index();
-    let item = if idx >= 100 {
-        let rel = (idx - 100) as usize;
-        ui.get_games().row_data(rel)
-    } else {
-        ui.get_recent_games().row_data(idx as usize)
-    };
-    if let Some(game) = item {
+    let idx = ui.get_focused_card_index() as usize;
+    if let Some(game) = ui.get_games().row_data(idx) {
         ui.set_selected_game(game);
     } else if ui.get_games().row_count() > 0 {
         if let Some(first) = ui.get_games().row_data(0) {
@@ -52,57 +46,49 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
             sync_selected_game(ui);
         }
         NavAction::Left => {
-            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+            if !ui.get_show_game_detail()
+                && !ui.get_show_power_menu()
+                && !ui.get_show_game_mode_prompt()
+            {
                 let idx = ui.get_focused_card_index();
-                if idx >= 100 {
-                    let rel = idx - 100;
-                    if rel > 0 {
-                        ui.set_focused_card_index(idx - 1);
-                    }
-                } else if idx > 0 {
+                if idx > 0 {
                     ui.set_focused_card_index(idx - 1);
+                    sync_selected_game(ui);
                 }
-                sync_selected_game(ui);
             }
         }
         NavAction::Right => {
-            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
+            if !ui.get_show_game_detail()
+                && !ui.get_show_power_menu()
+                && !ui.get_show_game_mode_prompt()
+            {
                 let idx = ui.get_focused_card_index();
                 let games_len = ui.get_games().row_count() as i32;
-                let recent_len = ui.get_recent_games().row_count() as i32;
-                if idx >= 100 {
-                    let rel = idx - 100;
-                    if rel + 1 < games_len {
-                        ui.set_focused_card_index(idx + 1);
-                    }
-                } else if idx + 1 < recent_len {
+                if idx + 1 < games_len {
                     ui.set_focused_card_index(idx + 1);
+                    sync_selected_game(ui);
                 }
-                sync_selected_game(ui);
             }
         }
         NavAction::Up => {
-            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
-                let idx = ui.get_focused_card_index();
-                if idx >= 100 && ui.get_selected_tab() == 0 && ui.get_recent_games().row_count() > 0
-                {
-                    let target = std::cmp::min(
-                        (idx - 100) as usize,
-                        ui.get_recent_games().row_count().saturating_sub(1),
-                    );
-                    ui.set_focused_card_index(target as i32);
-                }
+            if !ui.get_show_game_detail()
+                && !ui.get_show_power_menu()
+                && !ui.get_show_game_mode_prompt()
+                && ui.get_focused_card_index() > 0
+            {
+                ui.set_focused_card_index(0);
                 sync_selected_game(ui);
             }
         }
         NavAction::Down => {
-            if !ui.get_show_game_detail() && !ui.get_show_power_menu() {
-                let idx = ui.get_focused_card_index();
-                if idx < 100 && ui.get_games().row_count() > 0 {
-                    let target =
-                        std::cmp::min(idx as usize, ui.get_games().row_count().saturating_sub(1));
-                    ui.set_focused_card_index(100 + target as i32);
-                }
+            let games_len = ui.get_games().row_count() as i32;
+            if !ui.get_show_game_detail()
+                && !ui.get_show_power_menu()
+                && !ui.get_show_game_mode_prompt()
+                && games_len > 0
+                && ui.get_focused_card_index() < games_len - 1
+            {
+                ui.set_focused_card_index(games_len - 1);
                 sync_selected_game(ui);
             }
         }
@@ -124,14 +110,8 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
                 let cur = ui.get_trim_tier();
                 ui.invoke_set_trim_tier((cur + 1) % 3);
             } else {
-                let idx = ui.get_focused_card_index();
-                let item = if idx >= 100 {
-                    let rel = (idx - 100) as usize;
-                    ui.get_games().row_data(rel)
-                } else {
-                    ui.get_recent_games().row_data(idx as usize)
-                };
-                if let Some(game) = item {
+                let idx = ui.get_focused_card_index() as usize;
+                if let Some(game) = ui.get_games().row_data(idx) {
                     ui.set_selected_game(game);
                     ui.set_show_game_detail(true);
                 }
@@ -151,15 +131,9 @@ pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
             }
         }
         NavAction::ContextMenu => {
-            let idx = ui.get_focused_card_index();
-            let game_id = if idx >= 100 {
-                let rel = (idx - 100) as usize;
-                ui.get_games().row_data(rel).map(|g| g.id)
-            } else {
-                ui.get_recent_games().row_data(idx as usize).map(|g| g.id)
-            };
-            if let Some(id) = game_id {
-                ui.invoke_toggle_favorite(id);
+            let idx = ui.get_focused_card_index() as usize;
+            if let Some(game) = ui.get_games().row_data(idx) {
+                ui.invoke_toggle_favorite(game.id);
             }
         }
         NavAction::Options => {

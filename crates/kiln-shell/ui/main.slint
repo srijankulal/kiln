@@ -16,14 +16,14 @@ export struct GameItem {
 export component MainWindow inherits Window {
     title: "Kiln";
     default-font-family: "Segoe UI, sans-serif";
-    background: Theme.background;
+    background: #080B12;
     min-width: 1280px;
     min-height: 720px;
 
     // View State
     in-out property <[GameItem]> games: [];
     in-out property <[GameItem]> recent_games: [];
-    in-out property <int> selected_tab: 0; // 0: All, 1: Recent, 2: Favorites, 3: Steam, 4: Epic, 5: Standalone, 6: Settings
+    in-out property <int> selected_tab: 0; // 0: All, 1: Recent, 2: Favorites, 3: Steam, 4: Epic, 5: Other, 6: Settings
     in-out property <int> focused_card_index: 0;
     
     // Modal State
@@ -32,7 +32,7 @@ export component MainWindow inherits Window {
     in-out property <bool> show_power_menu: false;
     
     // Game Mode Optimizer & Warning State
-    in-out property <bool> show_game_mode_prompt: true;
+    in-out property <bool> show_game_mode_prompt: false;
     in-out property <bool> is_optimizing: false;
     in-out property <string> opt_status_text: "Ready to dedicate system hardware exclusively to gaming.";
     in-out property <float> opt_progress: 0.0;
@@ -46,12 +46,8 @@ export component MainWindow inherits Window {
     in-out property <string> display_info: "TV: 3840x2160 @ 120Hz";
     in-out property <string> status_message: "";
 
-    // Derived Carousel offsets
-    property <int> recent_active_idx: root.focused_card_index < 100 ? root.focused_card_index : 0;
-    property <length> recent_scroll_offset: root.recent_active_idx > 2 ? ((root.recent_active_idx - 2) * 232px) : 0px;
-
-    property <int> all_active_idx: root.focused_card_index >= 100 ? (root.focused_card_index - 100) : 0;
-    property <length> all_scroll_offset: root.all_active_idx > 2 ? ((root.all_active_idx - 2) * 232px) : 0px;
+    // Derived Carousel scroll offset for the primary shelf
+    property <length> carousel_scroll_offset: root.focused_card_index > 2 ? ((root.focused_card_index - 2) * 232px) : 0px;
 
     // Callbacks to Rust backend
     callback play_game(string);
@@ -150,432 +146,313 @@ export component MainWindow inherits Window {
         Rectangle {
             width: 100%;
             height: 100%;
-            background: @linear-gradient(180deg, #0B111F 0%, #07090E 40%, #05060A 100%);
+            background: @linear-gradient(180deg, #0C121D 0%, #07090E 50%, #04060A 100%);
 
             // Subtle top glow flare
             Rectangle {
                 width: 70%;
-                height: 180px;
-                y: -90px;
+                height: 200px;
+                y: -100px;
                 x: (parent.width - self.width) / 2;
-                background: @radial-gradient(circle, #00D2FF18 0%, #00000000 70%);
+                background: @radial-gradient(circle, #00D2FF14 0%, #00000000 70%);
             }
 
-            // Main Content Layout within safe margins (TV overscan)
+            // Main Content Layout within TV safe margins
             VerticalLayout {
-                padding-left: Theme.safe-margin-h;
-                padding-right: Theme.safe-margin-h;
-                padding-top: Theme.safe-margin-v;
-                padding-bottom: Theme.safe-margin-v;
-                spacing: 18px;
+                padding-left: 44px;
+                padding-right: 44px;
+                padding-top: 24px;
+                padding-bottom: 24px;
+                spacing: 16px;
+                alignment: space-between;
 
                 // 1. TOP HEADER BAR
                 HorizontalLayout {
-                    height: 52px;
+                    height: 48px;
                     alignment: space-between;
 
-                    // Left: Logo and Status
+                    // Left: Logo + Tab Switcher
                     HorizontalLayout {
-                        spacing: 16px;
+                        spacing: 24px;
                         alignment: start;
 
-                        // Kiln Brand Emblem
+                        // Brand Emblem
                         HorizontalLayout {
                             spacing: 10px;
                             alignment: center;
 
-                            // Glowing Ember Mark
                             Rectangle {
-                                width: 34px;
-                                height: 34px;
-                                border-radius: 9px;
-                                background: @linear-gradient(135deg, Theme.accent-warm 0%, #B91C1C 100%);
+                                width: 32px;
+                                height: 32px;
+                                border-radius: 8px;
+                                background: @linear-gradient(135deg, #FF5533 0%, #B91C1C 100%);
                                 border-width: 1px;
                                 border-color: #FFAA88;
-                                y: 9px;
+                                y: 8px;
 
                                 Text {
                                     text: "▲";
                                     color: #FFFFFF;
-                                    font-size: 16px;
+                                    font-size: 15px;
                                     font-weight: 900;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
                             }
 
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 0px;
-
-                                Text {
-                                    text: "KILN";
-                                    color: #FFFFFF;
-                                    font-size: Theme.font-title;
-                                    font-weight: 900;
-                                    letter-spacing: 2px;
-                                }
-
-                                Text {
-                                    text: "GAME MODE";
-                                    color: Theme.accent;
-                                    font-size: Theme.font-badge;
-                                    font-weight: 800;
-                                    letter-spacing: 1.5px;
-                                }
+                            Text {
+                                text: "KILN";
+                                color: #FFFFFF;
+                                font-size: 20px;
+                                font-weight: 900;
+                                letter-spacing: 2px;
+                                vertical-alignment: center;
                             }
                         }
 
                         // Divider
                         Rectangle {
                             width: 1px;
-                            height: 24px;
-                            background: Theme.border-subtle;
-                            y: 14px;
+                            height: 22px;
+                            background: #FFFFFF15;
+                            y: 13px;
                         }
 
-                        // Status message / toast (if any)
-                        if (root.status_message != ""): Rectangle {
-                            height: 32px;
-                            border-radius: 16px;
-                            background: #10B98125;
-                            border-width: 1px;
-                            border-color: #10B98180;
-                            y: 10px;
+                        // Category Tab Bar
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
 
-                            HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                Text {
-                                    text: root.status_message;
-                                    color: #10B981;
-                                    font-size: Theme.font-small;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
+                            // Tab 0: All
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 0 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 0 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "ALL";
+                                        color: root.selected_tab == 0 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 0; root.change_tab(0); }
+                                }
+                            }
+
+                            // Tab 1: Recent
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 1 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 1 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "RECENT";
+                                        color: root.selected_tab == 1 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 1; root.change_tab(1); }
+                                }
+                            }
+
+                            // Tab 2: Favorites
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 2 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 2 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "FAVORITES";
+                                        color: root.selected_tab == 2 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 2; root.change_tab(2); }
+                                }
+                            }
+
+                            // Tab 3: Steam
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 3 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 3 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "STEAM";
+                                        color: root.selected_tab == 3 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 3; root.change_tab(3); }
+                                }
+                            }
+
+                            // Tab 4: Epic
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 4 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 4 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "EPIC";
+                                        color: root.selected_tab == 4 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 4; root.change_tab(4); }
+                                }
+                            }
+
+                            // Tab 5: Settings
+                            Rectangle {
+                                height: 32px;
+                                border-radius: 16px;
+                                background: root.selected_tab == 6 ? #00D2FF22 : #00000000;
+                                border-width: root.selected_tab == 6 ? 1px : 0px;
+                                border-color: #00D2FF80;
+                                y: 8px;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    Text {
+                                        text: "SETTINGS";
+                                        color: root.selected_tab == 6 ? #00D2FF : #8A98AC;
+                                        font-size: 13px;
+                                        font-weight: 800;
+                                        letter-spacing: 0.5px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.selected_tab = 6; root.change_tab(6); }
                                 }
                             }
                         }
                     }
 
-                    // Center: Controller Bumper Tabs (LB / RB)
+                    // Right: Clock, Optimizer Trigger, & Power
                     HorizontalLayout {
-                        spacing: 10px;
-                        alignment: center;
-
-                        // LB Bumper Badge
-                        GamepadBadge {
-                            btn: "LB";
-                            btn_color: Theme.btn-bumper;
-                            is_pill: true;
-                        }
-
-                        // Tab Pills
-                        Rectangle {
-                            height: 42px;
-                            border-radius: 21px;
-                            background: #0D1424B0;
-                            border-width: 1px;
-                            border-color: Theme.border-subtle;
-
-                            HorizontalLayout {
-                                padding-left: 6px;
-                                padding-right: 6px;
-                                spacing: 4px;
-                                alignment: center;
-
-                                // Tab 0: All
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 0 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "ALL";
-                                            color: root.selected_tab == 0 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 0; root.change_tab(0); }
-                                    }
-                                }
-
-                                // Tab 1: Recent
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 1 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "RECENT";
-                                            color: root.selected_tab == 1 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 1; root.change_tab(1); }
-                                    }
-                                }
-
-                                // Tab 2: Favorites
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 2 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "FAVORITES";
-                                            color: root.selected_tab == 2 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 2; root.change_tab(2); }
-                                    }
-                                }
-
-                                // Tab 3: Steam
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 3 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "STEAM";
-                                            color: root.selected_tab == 3 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 3; root.change_tab(3); }
-                                    }
-                                }
-
-                                // Tab 4: Epic
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 4 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "EPIC";
-                                            color: root.selected_tab == 4 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 4; root.change_tab(4); }
-                                    }
-                                }
-
-                                // Tab 5: Other
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 5 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "OTHER";
-                                            color: root.selected_tab == 5 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 5; root.change_tab(5); }
-                                    }
-                                }
-
-                                // Tab 6: Settings
-                                Rectangle {
-                                    height: 32px;
-                                    border-radius: 16px;
-                                    background: root.selected_tab == 6 ? Theme.accent : #00000000;
-                                    y: 5px;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        Text {
-                                            text: "SETTINGS";
-                                            color: root.selected_tab == 6 ? #000000 : Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.selected_tab = 6; root.change_tab(6); }
-                                    }
-                                }
-                            }
-                        }
-
-                        // RB Bumper Badge
-                        GamepadBadge {
-                            btn: "RB";
-                            btn_color: Theme.btn-bumper;
-                            is_pill: true;
-                        }
-                    }
-
-                    // Right: TV Display Pill, Clock & Power Button
-                    HorizontalLayout {
-                        spacing: 14px;
+                        spacing: 16px;
                         alignment: end;
 
-                        // TV Display Pill
+                        // Quick Game Mode Trigger
                         Rectangle {
-                            height: 34px;
-                            border-radius: 17px;
-                            background: #0E1628A0;
+                            height: 32px;
+                            border-radius: 16px;
+                            background: #00D2FF18;
                             border-width: 1px;
-                            border-color: Theme.border-subtle;
-                            y: 9px;
+                            border-color: #00D2FF60;
+                            y: 8px;
 
                             HorizontalLayout {
                                 padding-left: 12px;
                                 padding-right: 12px;
                                 spacing: 6px;
-                                alignment: center;
-
-                                Text {
-                                    text: "📺";
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-
-                                Text {
-                                    text: root.display_info;
-                                    color: Theme.text-secondary;
-                                    font-size: Theme.font-badge;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-
-                        // Clock
-                        Text {
-                            text: root.clock_time;
-                            color: #FFFFFF;
-                            font-size: Theme.font-title;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-
-                        // Game Mode Optimizer Button
-                        Rectangle {
-                            height: 38px;
-                            border-radius: 19px;
-                            background: @linear-gradient(135deg, #00D2FF20 0%, #00779930 100%);
-                            border-width: 1px;
-                            border-color: Theme.accent;
-                            y: 7px;
-
-                            HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 14px;
-                                spacing: 6px;
 
                                 Text {
                                     text: "⚡";
-                                    color: Theme.accent;
-                                    font-size: 14px;
+                                    font-size: 13px;
                                     vertical-alignment: center;
                                 }
-
                                 Text {
                                     text: "GAME MODE";
-                                    color: Theme.text;
-                                    font-size: Theme.font-badge;
+                                    color: #00D2FF;
+                                    font-size: 12px;
                                     font-weight: 800;
                                     letter-spacing: 0.8px;
                                     vertical-alignment: center;
                                 }
                             }
-
                             TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.show_game_mode_prompt = true; }
                             }
                         }
 
+                        // Digital Clock
+                        Text {
+                            text: root.clock_time;
+                            color: #FFFFFF;
+                            font-size: 18px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+
                         // Power Button
                         Rectangle {
-                            width: 38px;
-                            height: 38px;
-                            border-radius: 19px;
-                            background: @linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+                            width: 36px;
+                            height: 36px;
+                            border-radius: 18px;
+                            background: #1E293B80;
                             border-width: 1px;
-                            border-color: Theme.accent-warm;
-                            y: 7px;
+                            border-color: #FF553380;
+                            y: 6px;
 
                             Text {
                                 text: "⏻";
-                                color: Theme.accent-warm;
-                                font-size: 18px;
+                                color: #FF5533;
+                                font-size: 17px;
                                 font-weight: 900;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
-
                             TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.show_power_menu = true; }
@@ -586,65 +463,46 @@ export component MainWindow inherits Window {
 
                 // 2. MAIN VIEW AREA (GAMES LIBRARY OR SETTINGS)
                 if (root.selected_tab != 6): VerticalLayout {
-                    spacing: 16px;
+                    spacing: 18px;
 
-                    // Hero Spotlight Banner (Live showcase of the focused game)
+                    // Hero Showcase Banner (Dynamic spotlight on active game)
                     if (root.selected_game.title != ""): Rectangle {
-                        height: 94px;
+                        height: 110px;
                         border-radius: 16px;
-                        background: @linear-gradient(90deg, #121A2CB8 0%, #0C122070 50%, #00000000 100%);
+                        background: @linear-gradient(90deg, #131C2DB8 0%, #0A111EB0 50%, #00000000 100%);
                         border-width: 1px;
-                        border-color: #243552;
+                        border-color: #24355280;
 
                         HorizontalLayout {
-                            padding-left: 20px;
-                            padding-right: 22px;
+                            padding-left: 24px;
+                            padding-right: 24px;
                             alignment: space-between;
 
-                            // Left: Poster Thumbnail + Title & Quick Stats
-                            HorizontalLayout {
-                                spacing: 16px;
-                                alignment: start;
+                            // Left: Title + Badges
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
 
-                                if (root.selected_game.has_poster): Rectangle {
-                                    width: 44px;
-                                    height: 66px;
-                                    border-radius: 6px;
-                                    border-width: 1px;
-                                    border-color: #FFFFFF30;
-                                    clip: true;
-                                    y: 14px;
-                                    Image {
-                                        width: 100%;
-                                        height: 100%;
-                                        source: root.selected_game.poster;
-                                        image-fit: cover;
-                                    }
+                                Text {
+                                    text: root.selected_game.title;
+                                    color: #FFFFFF;
+                                    font-size: 26px;
+                                    font-weight: 900;
+                                    letter-spacing: 0.5px;
+                                    overflow: elide;
                                 }
-
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 6px;
-
-                                    Text {
-                                        text: root.selected_game.title;
-                                        color: #FFFFFF;
-                                        font-size: Theme.font-headline;
-                                        font-weight: 900;
-                                        letter-spacing: 0.5px;
-                                        overflow: elide;
-                                    }
 
                                 HorizontalLayout {
                                     spacing: 12px;
                                     alignment: start;
 
+                                    // Launcher Tag
                                     Rectangle {
                                         height: 22px;
-                                        border-radius: 5px;
-                                        background: root.selected_game.launcher == "Steam" ? Theme.steam-color :
-                                                   (root.selected_game.launcher == "Epic" ? Theme.epic-color :
-                                                   (root.selected_game.launcher == "Xbox" ? Theme.xbox-color : Theme.standalone-color));
+                                        border-radius: 6px;
+                                        background: root.selected_game.launcher == "Steam" ? #1A78C2 :
+                                                   (root.selected_game.launcher == "Epic" ? #334155 :
+                                                   (root.selected_game.launcher == "Xbox" ? #107C10 : #7C3AED));
 
                                         HorizontalLayout {
                                             padding-left: 8px;
@@ -652,8 +510,9 @@ export component MainWindow inherits Window {
                                             Text {
                                                 text: root.selected_game.launcher;
                                                 color: #FFFFFF;
-                                                font-size: Theme.font-badge;
+                                                font-size: 11px;
                                                 font-weight: 800;
+                                                letter-spacing: 0.5px;
                                                 vertical-alignment: center;
                                             }
                                         }
@@ -661,102 +520,74 @@ export component MainWindow inherits Window {
 
                                     if (root.selected_game.playtime_hours != ""): Text {
                                         text: "⏱ " + root.selected_game.playtime_hours + " PLAYED";
-                                        color: Theme.text-secondary;
-                                        font-size: Theme.font-badge;
+                                        color: #94A3B8;
+                                        font-size: 12px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
 
                                     if (root.selected_game.last_played != ""): Text {
                                         text: "•  LAST PLAYED: " + root.selected_game.last_played;
-                                        color: Theme.text-muted;
-                                        font-size: Theme.font-badge;
+                                        color: #64748B;
+                                        font-size: 12px;
                                         font-weight: 700;
                                         vertical-alignment: center;
                                     }
 
                                     if (root.selected_game.is_favorite): Text {
                                         text: "★ FAVORITE";
-                                        color: Theme.accent-gold;
-                                        font-size: Theme.font-badge;
+                                        color: #FBBF24;
+                                        font-size: 12px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
                                 }
                             }
-                        }
 
-                            // Right: Controller Action Hints
+                            // Right: Prominent Play Button Trigger
                             HorizontalLayout {
-                                spacing: 20px;
+                                spacing: 14px;
                                 alignment: center;
 
-                                GamepadBadge {
-                                    btn: "A";
-                                    btn_color: Theme.btn-a;
-                                    label: "Play";
-                                }
+                                Rectangle {
+                                    height: 44px;
+                                    border-radius: 12px;
+                                    background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
+                                    border-width: 1px;
+                                    border-color: #88EEFF;
 
-                                GamepadBadge {
-                                    btn: "X";
-                                    btn_color: Theme.btn-x;
-                                    label: root.selected_game.is_favorite ? "Unfavorite" : "Favorite";
-                                }
-                            }
-                        }
-                    }
+                                    HorizontalLayout {
+                                        padding-left: 20px;
+                                        padding-right: 20px;
+                                        spacing: 8px;
+                                        alignment: center;
 
-                    // Section 1: Continue Playing Row (shown on All Tab if recent games exist)
-                    if (root.selected_tab == 0 && root.recent_games.length > 0): VerticalLayout {
-                        spacing: 10px;
+                                        Text {
+                                            text: "▶";
+                                            color: #050A14;
+                                            font-size: 14px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "PLAY (Enter)";
+                                            color: #050A14;
+                                            font-size: 14px;
+                                            font-weight: 900;
+                                            letter-spacing: 0.5px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
 
-                        HorizontalLayout {
-                            alignment: space-between;
-                            Text {
-                                text: "CONTINUE PLAYING";
-                                color: Theme.text-primary;
-                                font-size: Theme.font-body;
-                                font-weight: 800;
-                                letter-spacing: 1.2px;
-                            }
-                            Text {
-                                text: root.recent_games.length + " RECENT";
-                                color: Theme.text-muted;
-                                font-size: Theme.font-badge;
-                                font-weight: 700;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        // Horizontal Carousel Shelf
-                        Rectangle {
-                            height: 350px;
-                            clip: true;
-
-                            HorizontalLayout {
-                                x: -root.recent_scroll_offset;
-                                animate x { duration: 160ms; easing: ease-out; }
-                                spacing: 20px;
-                                alignment: start;
-
-                                for game[index] in root.recent_games: GameCard {
-                                    title: game.title;
-                                    launcher: game.launcher;
-                                    has_poster: game.has_poster;
-                                    poster: game.poster;
-                                    is_favorite: game.is_favorite;
-                                    is_card_focused: root.focused_card_index == index;
-
-                                    clicked => {
-                                        root.selected_game = game;
-                                        root.show_game_detail = true;
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.play_game(root.selected_game.id); }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Section 2: Library Grid / Shelf Header
+                    // Shelf Header
                     HorizontalLayout {
                         alignment: space-between;
                         Text {
@@ -764,30 +595,30 @@ export component MainWindow inherits Window {
                                   (root.selected_tab == 1 ? "RECENTLY PLAYED" :
                                   (root.selected_tab == 2 ? "FAVORITES" :
                                   (root.selected_tab == 3 ? "STEAM LIBRARY" :
-                                  (root.selected_tab == 4 ? "EPIC GAMES" : "OTHER / STANDALONE"))));
-                            color: Theme.text-primary;
-                            font-size: Theme.font-body;
+                                  (root.selected_tab == 4 ? "EPIC GAMES" : "OTHER TITLES"))));
+                            color: #FFFFFF;
+                            font-size: 14px;
                             font-weight: 800;
-                            letter-spacing: 1.2px;
+                            letter-spacing: 1px;
                         }
 
                         Text {
-                            text: root.games.length + " GAMES INSTALLED";
-                            color: Theme.accent;
-                            font-size: Theme.font-badge;
+                            text: root.games.length + " TITLES";
+                            color: #00D2FF;
+                            font-size: 12px;
                             font-weight: 800;
                             letter-spacing: 0.5px;
                             vertical-alignment: center;
                         }
                     }
 
-                    // Section 3: Library Cards Carousel
+                    // Primary Game Carousel Shelf (Single, fluid ribbon)
                     if (root.games.length > 0): Rectangle {
-                        height: 350px;
+                        height: 330px;
                         clip: true;
 
                         HorizontalLayout {
-                            x: -root.all_scroll_offset;
+                            x: -root.carousel_scroll_offset;
                             animate x { duration: 160ms; easing: ease-out; }
                             spacing: 20px;
                             alignment: start;
@@ -798,74 +629,61 @@ export component MainWindow inherits Window {
                                 has_poster: game.has_poster;
                                 poster: game.poster;
                                 is_favorite: game.is_favorite;
-                                is_card_focused: root.focused_card_index == (index + 100) || (root.selected_tab != 0 && root.focused_card_index == index);
+                                is_card_focused: root.focused_card_index == index;
 
                                 clicked => {
                                     root.selected_game = game;
+                                    root.focused_card_index = index;
                                     root.show_game_detail = true;
                                 }
                             }
                         }
                     }
 
-                    // Section 4: Empty State
+                    // Empty Library State
                     if (root.games.length == 0): Rectangle {
-                        height: 320px;
+                        height: 330px;
                         border-radius: 16px;
-                        background: @linear-gradient(135deg, #0F1626A0 0%, #090E1AA0 100%);
+                        background: #0D142460;
                         border-width: 1px;
-                        border-color: Theme.border-subtle;
+                        border-color: #24355240;
 
                         VerticalLayout {
                             alignment: center;
-                            spacing: 16px;
+                            spacing: 14px;
 
                             Text {
                                 text: "🎮";
-                                font-size: 48px;
+                                font-size: 40px;
                                 horizontal-alignment: center;
                             }
 
                             Text {
-                                text: "No games found in this category.";
-                                color: Theme.text-primary;
-                                font-size: Theme.font-title;
+                                text: "No games found in this category";
+                                color: #FFFFFF;
+                                font-size: 18px;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                             }
 
-                            Text {
-                                text: "Kiln scans Steam, Epic Games, Xbox, and custom directories.";
-                                color: Theme.text-secondary;
-                                font-size: Theme.font-body;
-                                horizontal-alignment: center;
-                            }
-
                             Rectangle {
-                                width: 220px;
-                                height: 46px;
-                                border-radius: 10px;
-                                background: Theme.accent;
+                                width: 180px;
+                                height: 40px;
+                                border-radius: 8px;
+                                background: #00D2FF;
+                                x: (parent.width - self.width) / 2;
 
                                 HorizontalLayout {
                                     alignment: center;
-                                    spacing: 8px;
+                                    spacing: 6px;
                                     Text {
-                                        text: "↻";
-                                        font-size: 16px;
-                                        color: #000000;
-                                        font-weight: 900;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        text: "Rescan Library";
-                                        color: #000000;
-                                        font-size: Theme.font-small;
+                                        text: "↻ Rescan Library";
+                                        color: #050A14;
+                                        font-size: 13px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
                                 }
-
                                 TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => { root.rescan_library(); }
@@ -875,29 +693,30 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 3. SETTINGS DASHBOARD (Tab 6)
+                // 3. SETTINGS TAB (Clean 3-Card Dashboard)
                 if (root.selected_tab == 6): VerticalLayout {
                     spacing: 16px;
 
                     Text {
                         text: "SYSTEM & CONSOLE SETTINGS";
-                        color: Theme.text-primary;
-                        font-size: Theme.font-headline;
+                        color: #FFFFFF;
+                        font-size: 20px;
                         font-weight: 900;
                         letter-spacing: 1px;
                     }
 
                     HorizontalLayout {
-                        spacing: 24px;
+                        spacing: 20px;
                         alignment: space-between;
 
-                        // Card 1: Performance & Process Trimming
+                        // Card 1: Performance & Process Optimizer
                         Rectangle {
                             horizontal-stretch: 1;
-                            border-radius: 16px;
-                            background: @linear-gradient(180deg, #121A2CB0 0%, #0A101CB0 100%);
+                            height: 420px;
+                            border-radius: 14px;
+                            background: #0E1628B0;
                             border-width: 1px;
-                            border-color: Theme.border-subtle;
+                            border-color: #24355280;
 
                             VerticalLayout {
                                 padding: 22px;
@@ -907,159 +726,94 @@ export component MainWindow inherits Window {
                                     spacing: 10px;
                                     Text { text: "⚡"; font-size: 20px; vertical-alignment: center; }
                                     Text {
-                                        text: "Background Trimming";
-                                        color: Theme.accent;
-                                        font-size: Theme.font-title;
+                                        text: "Game Mode Optimizer";
+                                        color: #00D2FF;
+                                        font-size: 17px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
                                 }
 
                                 Text {
-                                    text: "Suspends non-essential background processes (browsers, chat, sync) to maximize game framerates and minimize latency.";
-                                    color: Theme.text-secondary;
-                                    font-size: Theme.font-small;
+                                    text: "Closes background consumer apps and flushes system RAM to dedicate maximum GPU/CPU power to games.";
+                                    color: #94A3B8;
+                                    font-size: 12px;
                                     wrap: word-wrap;
                                 }
 
-                                // Tier 0
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 44px;
+                                    border-radius: 8px;
+                                    background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "⚡ Run Game Mode Optimizer";
+                                            color: #050A14;
+                                            font-size: 13px;
+                                            font-weight: 900;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.show_game_mode_prompt = true; }
+                                    }
+                                }
+
+                                Text {
+                                    text: "Trimming Tier Selection:";
+                                    color: #CBD5E1;
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                }
+
+                                Rectangle {
+                                    height: 44px;
+                                    border-radius: 8px;
                                     background: root.trim_tier == 0 ? #00D2FF25 : #131E33;
                                     border-width: root.trim_tier == 0 ? 2px : 1px;
-                                    border-color: root.trim_tier == 0 ? Theme.accent : Theme.border-subtle;
+                                    border-color: root.trim_tier == 0 ? #00D2FF : #243552;
 
                                     HorizontalLayout {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: space-between;
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Text {
-                                                text: "Tier 0: Safe (EcoQoS Throttling)";
-                                                color: root.trim_tier == 0 ? Theme.accent : Theme.text-primary;
-                                                font-size: Theme.font-small;
-                                                font-weight: 700;
-                                            }
-                                            Text {
-                                                text: "Lowers process priority without pausing execution";
-                                                color: Theme.text-muted;
-                                                font-size: Theme.font-badge;
-                                            }
-                                        }
-
-                                        Text {
-                                            text: root.trim_tier == 0 ? "● ACTIVE" : "○";
-                                            color: root.trim_tier == 0 ? Theme.accent : Theme.text-muted;
-                                            font-size: Theme.font-badge;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
+                                        Text { text: "Tier 0: EcoQoS (Power Throttling)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                        if (root.trim_tier == 0): Text { text: "ACTIVE"; color: #00D2FF; font-size: 11px; font-weight: 900; vertical-alignment: center; }
                                     }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.set_trim_tier(0); }
-                                    }
+                                    TouchArea { mouse-cursor: pointer; clicked => { root.set_trim_tier(0); } }
                                 }
 
-                                // Tier 1 (Default)
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 44px;
+                                    border-radius: 8px;
                                     background: root.trim_tier == 1 ? #00D2FF25 : #131E33;
                                     border-width: root.trim_tier == 1 ? 2px : 1px;
-                                    border-color: root.trim_tier == 1 ? Theme.accent : Theme.border-subtle;
+                                    border-color: root.trim_tier == 1 ? #00D2FF : #243552;
 
                                     HorizontalLayout {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: space-between;
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Text {
-                                                text: "Tier 1: Balanced (Suspend Apps) [Default]";
-                                                color: root.trim_tier == 1 ? Theme.accent : Theme.text-primary;
-                                                font-size: Theme.font-small;
-                                                font-weight: 700;
-                                            }
-                                            Text {
-                                                text: "Suspends known resource-heavy background apps";
-                                                color: Theme.text-muted;
-                                                font-size: Theme.font-badge;
-                                            }
-                                        }
-
-                                        Text {
-                                            text: root.trim_tier == 1 ? "● ACTIVE" : "○";
-                                            color: root.trim_tier == 1 ? Theme.accent : Theme.text-muted;
-                                            font-size: Theme.font-badge;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
+                                        Text { text: "Tier 1: Suspend (Default Console)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                        if (root.trim_tier == 1): Text { text: "ACTIVE"; color: #00D2FF; font-size: 11px; font-weight: 900; vertical-alignment: center; }
                                     }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.set_trim_tier(1); }
-                                    }
-                                }
-
-                                // Tier 2
-                                Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
-                                    background: root.trim_tier == 2 ? #00D2FF25 : #131E33;
-                                    border-width: root.trim_tier == 2 ? 2px : 1px;
-                                    border-color: root.trim_tier == 2 ? Theme.accent : Theme.border-subtle;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            Text {
-                                                text: "Tier 2: Aggressive (+ User Services)";
-                                                color: root.trim_tier == 2 ? Theme.accent : Theme.text-primary;
-                                                font-size: Theme.font-small;
-                                                font-weight: 700;
-                                            }
-                                            Text {
-                                                text: "Suspends all non-system background workloads";
-                                                color: Theme.text-muted;
-                                                font-size: Theme.font-badge;
-                                            }
-                                        }
-
-                                        Text {
-                                            text: root.trim_tier == 2 ? "● ACTIVE" : "○";
-                                            color: root.trim_tier == 2 ? Theme.accent : Theme.text-muted;
-                                            font-size: Theme.font-badge;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.set_trim_tier(2); }
-                                    }
+                                    TouchArea { mouse-cursor: pointer; clicked => { root.set_trim_tier(1); } }
                                 }
                             }
                         }
 
-                        // Card 2: Display & Power
+                        // Card 2: Display & Television Setup
                         Rectangle {
                             horizontal-stretch: 1;
-                            border-radius: 16px;
-                            background: @linear-gradient(180deg, #121A2CB0 0%, #0A101CB0 100%);
+                            height: 420px;
+                            border-radius: 14px;
+                            background: #0E1628B0;
                             border-width: 1px;
-                            border-color: Theme.border-subtle;
+                            border-color: #24355280;
 
                             VerticalLayout {
                                 padding: 22px;
@@ -1069,123 +823,62 @@ export component MainWindow inherits Window {
                                     spacing: 10px;
                                     Text { text: "📺"; font-size: 20px; vertical-alignment: center; }
                                     Text {
-                                        text: "Display & TV Mode";
-                                        color: Theme.accent;
-                                        font-size: Theme.font-title;
+                                        text: "TV & Display Topology";
+                                        color: #00D2FF;
+                                        font-size: 17px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
                                 }
 
                                 Text {
-                                    text: "Manages display topology, power profiles, and lid behavior during console play.";
-                                    color: Theme.text-secondary;
-                                    font-size: Theme.font-small;
+                                    text: "Configure 10-foot TV resolution, HDR output, and secondary screen isolation.";
+                                    color: #94A3B8;
+                                    font-size: 12px;
                                     wrap: word-wrap;
                                 }
 
-                                // Status Box 1: Topology
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 60px;
+                                    border-radius: 8px;
                                     background: #131E33;
                                     border-width: 1px;
-                                    border-color: Theme.border-subtle;
+                                    border-color: #243552;
 
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-
-                                        Text {
-                                            text: "Target Display Topology";
-                                            color: Theme.text-primary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-
-                                        Text {
-                                            text: "TV-Only (SDC_EXTERNAL)";
-                                            color: Theme.accent;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        alignment: center;
+                                        Text { text: "Primary Target"; color: #64748B; font-size: 11px; font-weight: 700; }
+                                        Text { text: root.display_info; color: #FFFFFF; font-size: 13px; font-weight: 800; }
                                     }
                                 }
 
-                                // Status Box 2: Lid Action
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 44px;
+                                    border-radius: 8px;
                                     background: #131E33;
                                     border-width: 1px;
-                                    border-color: Theme.border-subtle;
+                                    border-color: #243552;
 
                                     HorizontalLayout {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: space-between;
-
-                                        Text {
-                                            text: "Laptop Lid Close Action";
-                                            color: Theme.text-primary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-
-                                        Text {
-                                            text: "Do Nothing (Play with lid closed)";
-                                            color: #10B981;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                }
-
-                                // Status Box 3: Overscan
-                                Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
-                                    background: #131E33;
-                                    border-width: 1px;
-                                    border-color: Theme.border-subtle;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-
-                                        Text {
-                                            text: "TV Overscan Protection";
-                                            color: Theme.text-primary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-
-                                        Text {
-                                            text: "5% Safe Margins (Active)";
-                                            color: Theme.text-secondary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
+                                        Text { text: "Overscan Safe Margins (5%)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                        Text { text: "ENABLED"; color: #10B981; font-size: 11px; font-weight: 900; vertical-alignment: center; }
                                     }
                                 }
                             }
                         }
 
-                        // Card 3: Launchers & Maintenance
+                        // Card 3: Shell Behavior
                         Rectangle {
                             horizontal-stretch: 1;
-                            border-radius: 16px;
-                            background: @linear-gradient(180deg, #121A2CB0 0%, #0A101CB0 100%);
+                            height: 420px;
+                            border-radius: 14px;
+                            background: #0E1628B0;
                             border-width: 1px;
-                            border-color: Theme.border-subtle;
+                            border-color: #24355280;
 
                             VerticalLayout {
                                 padding: 22px;
@@ -1193,129 +886,53 @@ export component MainWindow inherits Window {
 
                                 HorizontalLayout {
                                     spacing: 10px;
-                                    Text { text: "🚀"; font-size: 20px; vertical-alignment: center; }
+                                    Text { text: "🎮"; font-size: 20px; vertical-alignment: center; }
                                     Text {
-                                        text: "Launchers & Library";
-                                        color: Theme.accent;
-                                        font-size: Theme.font-title;
+                                        text: "Shell & Behavior";
+                                        color: #00D2FF;
+                                        font-size: 17px;
                                         font-weight: 800;
                                         vertical-alignment: center;
                                     }
                                 }
 
                                 Text {
-                                    text: "Configure on-demand launcher behaviors and trigger instant library index updates.";
-                                    color: Theme.text-secondary;
-                                    font-size: Theme.font-small;
+                                    text: "Configure launcher exit rules, controller chord bindings, and automatic updates.";
+                                    color: #94A3B8;
+                                    font-size: 12px;
                                     wrap: word-wrap;
                                 }
 
-                                // Close launcher toggle
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 48px;
+                                    border-radius: 8px;
                                     background: #131E33;
                                     border-width: 1px;
-                                    border-color: Theme.border-subtle;
+                                    border-color: #243552;
 
                                     HorizontalLayout {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: space-between;
-
-                                        Text {
-                                            text: "Close Launcher after Game Exits";
-                                            color: Theme.text-primary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-
-                                        // Switch Pill
-                                        Rectangle {
-                                            width: 48px;
-                                            height: 26px;
-                                            border-radius: 13px;
-                                            background: root.close_launcher_on_exit ? Theme.accent : #334155;
-                                            y: 13px;
-
-                                            Rectangle {
-                                                width: 22px;
-                                                height: 22px;
-                                                border-radius: 11px;
-                                                background: #FFFFFF;
-                                                x: root.close_launcher_on_exit ? 24px : 2px;
-                                                y: 2px;
-                                                animate x { duration: 120ms; easing: ease-out; }
-                                            }
-                                        }
+                                        Text { text: "Close Launcher on Game Exit"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                        Text { text: root.close_launcher_on_exit ? "YES" : "NO"; color: root.close_launcher_on_exit ? #00D2FF : #64748B; font-size: 11px; font-weight: 900; vertical-alignment: center; }
                                     }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.toggle_close_launcher(); }
-                                    }
+                                    TouchArea { mouse-cursor: pointer; clicked => { root.toggle_close_launcher(); } }
                                 }
 
-                                // Rescan Button
                                 Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
-                                    background: @linear-gradient(90deg, Theme.accent 0%, #0099FF 100%);
-
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: 8px;
-                                        Text {
-                                            text: "↻";
-                                            color: #000000;
-                                            font-size: 16px;
-                                            font-weight: 900;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: "Rescan All Installed Games";
-                                            color: #000000;
-                                            font-size: Theme.font-small;
-                                            font-weight: 900;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.rescan_library(); }
-                                    }
-                                }
-
-                                // Journal State
-                                Rectangle {
-                                    height: 52px;
-                                    border-radius: 10px;
+                                    height: 48px;
+                                    border-radius: 8px;
                                     background: #131E33;
                                     border-width: 1px;
-                                    border-color: Theme.border-subtle;
+                                    border-color: #243552;
 
                                     HorizontalLayout {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: space-between;
-
-                                        Text {
-                                            text: "Crash Protection Journal";
-                                            color: Theme.text-primary;
-                                            font-size: Theme.font-small;
-                                            font-weight: 700;
-                                            vertical-alignment: center;
-                                        }
-
-                                        Text {
-                                            text: "WAL Active (Auto-Restore)";
-                                            color: #10B981;
-                                            font-size: Theme.font-small;
-                                            font-weight: 800;
-                                            vertical-alignment: center;
-                                        }
+                                        Text { text: "Emergency Abort Chord (Back+Start)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                        Text { text: "5 SECONDS"; color: #FF5533; font-size: 11px; font-weight: 900; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -1323,75 +940,42 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 4. BOTTOM CONTROLLER NAVIGATION BAR
-                Rectangle {
-                    height: 48px;
-                    border-radius: 12px;
-                    background: #0E1628B0;
-                    border-width: 1px;
-                    border-color: Theme.border-subtle;
+                // 4. BOTTOM FOOTER BAR (Clean shortcuts & controls)
+                HorizontalLayout {
+                    height: 36px;
+                    alignment: space-between;
 
+                    // Left: Gamepad controls
                     HorizontalLayout {
-                        padding-left: 24px;
-                        padding-right: 24px;
-                        spacing: 28px;
-                        alignment: center;
+                        spacing: 12px;
+                        alignment: start;
 
-                        GamepadBadge {
-                            btn: "A";
-                            btn_color: Theme.btn-a;
-                            label: "Select / Play";
-                        }
+                        GamepadBadge { btn: "A"; btn_color: #10B981; label: "Play"; }
+                        GamepadBadge { btn: "B"; btn_color: #EF4444; label: "Back"; }
+                        GamepadBadge { btn: "X"; btn_color: #3B82F6; label: "Favorite"; }
+                        GamepadBadge { btn: "Y"; btn_color: #F59E0B; label: "Rescan"; }
+                        GamepadBadge { btn: "LB/RB"; btn_color: #64748B; is_pill: true; label: "Tabs"; }
+                    }
 
-                        GamepadBadge {
-                            btn: "B";
-                            btn_color: Theme.btn-b;
-                            label: "Power Menu";
-                        }
+                    // Right: Keyboard shortcuts
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
 
-                        GamepadBadge {
-                            btn: "X";
-                            btn_color: Theme.btn-x;
-                            label: "Favorite";
-                        }
-
-                        GamepadBadge {
-                            btn: "Y";
-                            btn_color: Theme.btn-y;
-                            label: "Rescan";
-                        }
-
-                        GamepadBadge {
-                            btn: "TAB";
-                            btn_color: Theme.btn-bumper;
-                            is_pill: true;
-                            label: "Next Tab";
-                        }
-
-                        GamepadBadge {
-                            btn: "BACK+START";
-                            btn_color: #DC2626;
-                            is_pill: true;
-                            label: "Emergency Abort (5s)";
-                        }
-
-                        // Keyboard Navigation Cheat-sheet
                         Rectangle {
-                            height: 30px;
-                            border-radius: 15px;
+                            height: 28px;
+                            border-radius: 14px;
                             background: #FFFFFF0D;
                             border-width: 1px;
-                            border-color: #FFFFFF18;
+                            border-color: #FFFFFF15;
 
                             HorizontalLayout {
-                                padding-left: 14px;
-                                padding-right: 14px;
-                                spacing: 8px;
-
+                                padding-left: 12px;
+                                padding-right: 12px;
                                 Text {
-                                    text: "⌨ [WASD/Arrows] Navigate  [Enter] Select  [Esc] Back  [Q/E/Tab] Tabs  [F] Fav  [O] Game Mode";
-                                    color: #A0B2C6;
-                                    font-size: Theme.font-badge;
+                                    text: "⌨ [WASD/Arrows] Move   [Enter] Play   [Esc] Back   [Tab] Category   [O] Game Mode";
+                                    color: #94A3B8;
+                                    font-size: 11px;
                                     font-weight: 600;
                                     vertical-alignment: center;
                                 }
@@ -1403,43 +987,42 @@ export component MainWindow inherits Window {
         }
     }
 
-    // GAME DETAIL MODAL OVERLAY
+    // ==========================================
+    // MODAL DIALOGS
+    // ==========================================
+
+    // 1. GAME DETAIL MODAL
     if (root.show_game_detail): Rectangle {
         width: 100%;
         height: 100%;
         background: #03060FCC;
 
-        TouchArea {
-            clicked => { root.show_game_detail = false; }
-        }
+        TouchArea { clicked => { root.show_game_detail = false; } }
 
-        // Modal Window Card
         Rectangle {
-            width: 820px;
-            height: 490px;
-            border-radius: Theme.radius-xl + 6px;
-            drop-shadow-blur: Theme.e3-blur;
-            drop-shadow-offset-y: Theme.e3-offset;
-            drop-shadow-color: Theme.e3-color;
-            background: @linear-gradient(135deg, #111A2E 0%, #0B1120 100%);
-            border-width: 2px;
-            border-color: Theme.accent;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            width: 780px;
+            height: 480px;
+            border-radius: 20px;
+            background: @linear-gradient(180deg, #121828 0%, #0A0F1A 100%);
+            border-width: 1px;
+            border-color: #00D2FF60;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #000000D0;
+            clip: true;
 
             HorizontalLayout {
-                padding: 32px;
-                spacing: 32px;
+                padding: 30px;
+                spacing: 28px;
 
-                // Left Column: Poster Art
+                // Poster
                 Rectangle {
-                    width: 240px;
-                    height: 360px;
-                    border-radius: 14px;
-                    background: Theme.surface-card;
-                    clip: true;
+                    width: 250px;
+                    height: 100%;
+                    border-radius: 12px;
+                    background: #151D30;
                     border-width: 1px;
-                    border-color: Theme.border-subtle;
+                    border-color: #FFFFFF20;
+                    clip: true;
 
                     if (root.selected_game.has_poster): Image {
                         width: 100%;
@@ -1448,133 +1031,67 @@ export component MainWindow inherits Window {
                         image-fit: cover;
                     }
 
-                    if (!root.selected_game.has_poster): Rectangle {
-                        width: 100%;
-                        height: 100%;
-                        background: @linear-gradient(145deg, #1E1B4B 0%, #0F172A 100%);
-
-                        VerticalLayout {
-                            alignment: center;
-                            padding: 20px;
-                            spacing: 12px;
-
-                            Text {
-                                text: "🎮";
-                                font-size: 32px;
-                                horizontal-alignment: center;
-                            }
-
-                            Text {
-                                text: root.selected_game.title;
-                                color: #FFFFFF;
-                                font-size: Theme.font-title;
-                                font-weight: 800;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
-                        }
+                    if (!root.selected_game.has_poster): VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        Text { text: "🎮"; font-size: 40px; horizontal-alignment: center; }
+                        Text { text: root.selected_game.title; color: #FFFFFF; font-size: 16px; font-weight: 800; horizontal-alignment: center; wrap: word-wrap; }
                     }
                 }
 
-                // Right Column: Title, Metadata, Action Buttons
+                // Details & Actions
                 VerticalLayout {
                     spacing: 16px;
                     alignment: space-between;
 
                     VerticalLayout {
-                        spacing: 12px;
+                        spacing: 10px;
 
                         Text {
                             text: root.selected_game.title;
                             color: #FFFFFF;
-                            font-size: Theme.font-headline;
+                            font-size: 28px;
                             font-weight: 900;
                             wrap: word-wrap;
                         }
 
-                        // Launcher Badge & Playtime Pill Row
                         HorizontalLayout {
                             spacing: 10px;
-                            alignment: start;
-
                             Rectangle {
-                                height: 26px;
+                                height: 24px;
                                 border-radius: 6px;
-                                background: root.selected_game.launcher == "Steam" ? Theme.steam-color :
-                                           (root.selected_game.launcher == "Epic" ? Theme.epic-color :
-                                           (root.selected_game.launcher == "Xbox" ? Theme.xbox-color : Theme.standalone-color));
-
+                                background: root.selected_game.launcher == "Steam" ? #1A78C2 : #334155;
                                 HorizontalLayout {
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    Text {
-                                        text: root.selected_game.launcher;
-                                        color: #FFFFFF;
-                                        font-size: Theme.font-small;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Text { text: root.selected_game.launcher; color: #FFFFFF; font-size: 11px; font-weight: 800; vertical-alignment: center; }
                                 }
                             }
-
-                            if (root.selected_game.playtime_hours != ""): Rectangle {
-                                height: 26px;
-                                border-radius: 6px;
-                                background: #1E293B;
-
-                                HorizontalLayout {
-                                    padding-left: 10px;
-                                    padding-right: 10px;
-                                    Text {
-                                        text: "⏱ " + root.selected_game.playtime_hours;
-                                        color: Theme.text-secondary;
-                                        font-size: Theme.font-small;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
+                            if (root.selected_game.playtime_hours != ""): Text { text: "⏱ " + root.selected_game.playtime_hours; color: #94A3B8; font-size: 12px; font-weight: 700; vertical-alignment: center; }
                         }
 
                         if (root.selected_game.last_played != ""): Text {
                             text: "Last played: " + root.selected_game.last_played;
-                            color: Theme.text-muted;
-                            font-size: Theme.font-small;
+                            color: #64748B;
+                            font-size: 12px;
                         }
                     }
 
-                    // Action Buttons
+                    // Action buttons
                     VerticalLayout {
                         spacing: 12px;
 
-                        // Primary Play Button
                         Rectangle {
-                            height: 56px;
+                            height: 50px;
                             border-radius: 12px;
-                            background: @linear-gradient(90deg, Theme.accent 0%, #0099FF 100%);
+                            background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
 
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: 10px;
-
-                                Text {
-                                    text: "▶";
-                                    color: #000000;
-                                    font-size: 20px;
-                                    font-weight: 900;
-                                    vertical-alignment: center;
-                                }
-
-                                Text {
-                                    text: "PLAY NOW";
-                                    color: #000000;
-                                    font-size: Theme.font-body;
-                                    font-weight: 900;
-                                    letter-spacing: 1px;
-                                    vertical-alignment: center;
-                                }
+                                Text { text: "▶"; color: #050A14; font-size: 16px; vertical-alignment: center; }
+                                Text { text: "PLAY NOW (Enter)"; color: #050A14; font-size: 15px; font-weight: 900; vertical-alignment: center; }
                             }
-
                             TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => {
@@ -1584,35 +1101,18 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // Toggle Favorite Button
                         Rectangle {
-                            height: 46px;
+                            height: 44px;
                             border-radius: 10px;
-                            background: #182238;
+                            background: #1E293B80;
                             border-width: 1px;
-                            border-color: Theme.border-subtle;
+                            border-color: #334155;
 
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: 8px;
-
-                                Text {
-                                    text: root.selected_game.is_favorite ? "★" : "☆";
-                                    color: Theme.accent-gold;
-                                    font-size: 16px;
-                                    font-weight: 900;
-                                    vertical-alignment: center;
-                                }
-
-                                Text {
-                                    text: root.selected_game.is_favorite ? "In Favorites (Click to Remove)" : "Add to Favorites";
-                                    color: root.selected_game.is_favorite ? Theme.accent-gold : #FFFFFF;
-                                    font-size: Theme.font-small;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
-                                }
+                                Text { text: root.selected_game.is_favorite ? "★ In Favorites" : "☆ Add to Favorites (F)"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; }
                             }
-
                             TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => {
@@ -1622,21 +1122,15 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        // Close Button
                         Rectangle {
                             height: 40px;
                             border-radius: 8px;
-                            background: #00000000;
+                            background: #111827;
 
-                            Text {
-                                text: "Close (Back)";
-                                color: Theme.text-secondary;
-                                font-size: Theme.font-small;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                Text { text: "Close (Esc)"; color: #94A3B8; font-size: 12px; font-weight: 700; vertical-alignment: center; }
                             }
-
                             TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.show_game_detail = false; }
@@ -1648,517 +1142,219 @@ export component MainWindow inherits Window {
         }
     }
 
-    // POWER MENU MODAL OVERLAY
+    // 2. POWER MENU MODAL
     if (root.show_power_menu): Rectangle {
         width: 100%;
         height: 100%;
         background: #03060FCC;
 
-        TouchArea {
-            clicked => { root.show_power_menu = false; }
-        }
+        TouchArea { clicked => { root.show_power_menu = false; } }
 
-        // Power Options Card
         Rectangle {
-            width: 520px;
-            height: 420px;
-            border-radius: Theme.radius-xl + 6px;
-            drop-shadow-blur: Theme.e3-blur;
-            drop-shadow-offset-y: Theme.e3-offset;
-            drop-shadow-color: Theme.e3-color;
-            background: @linear-gradient(135deg, #111A2E 0%, #0B1120 100%);
-            border-width: 2px;
-            border-color: Theme.accent-warm;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
+            width: 420px;
+            height: 340px;
+            border-radius: 16px;
+            background: #0E1628;
+            border-width: 1px;
+            border-color: #243552;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #000000;
 
             VerticalLayout {
-                padding: 30px;
-                spacing: 16px;
+                padding: 24px;
+                spacing: 12px;
+                alignment: space-between;
 
-                Text {
-                    text: "POWER & SESSION";
-                    color: #FFFFFF;
-                    font-size: Theme.font-title;
-                    font-weight: 900;
-                    letter-spacing: 1.5px;
-                    horizontal-alignment: center;
-                }
+                Text { text: "POWER OPTIONS"; color: #FFFFFF; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
 
-                Text {
-                    text: "Choose what to do with your laptop and current session";
-                    color: Theme.text-secondary;
-                    font-size: Theme.font-small;
-                    horizontal-alignment: center;
-                }
-
-                // Option 1: Exit Game Mode
                 Rectangle {
-                    height: 54px;
-                    border-radius: 12px;
-                    background: @linear-gradient(90deg, #00D2FF25 0%, #0099FF15 100%);
-                    border-width: 1px;
-                    border-color: Theme.accent;
-
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        spacing: 12px;
-
-                        Text { text: "⏻"; color: Theme.accent; font-size: 18px; vertical-alignment: center; }
-                        Text {
-                            text: "Exit Game Mode (Restore Windows Desktop)";
-                            color: #FFFFFF;
-                            font-size: Theme.font-small;
-                            font-weight: 800;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            root.show_power_menu = false;
-                            root.power_action("exit");
-                        }
-                    }
+                    height: 48px;
+                    border-radius: 10px;
+                    background: #162032;
+                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "⏾"; color: #00D2FF; font-size: 16px; vertical-alignment: center; } Text { text: "Sleep System"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
+                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("sleep"); } }
                 }
 
-                // Option 2: Sleep
                 Rectangle {
-                    height: 54px;
-                    border-radius: 12px;
-                    background: #131E33;
-                    border-width: 1px;
-                    border-color: Theme.border-subtle;
-
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        spacing: 12px;
-
-                        Text { text: "☾"; color: Theme.text-secondary; font-size: 18px; vertical-alignment: center; }
-                        Text {
-                            text: "Sleep Laptop";
-                            color: #FFFFFF;
-                            font-size: Theme.font-small;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            root.show_power_menu = false;
-                            root.power_action("sleep");
-                        }
-                    }
+                    height: 48px;
+                    border-radius: 10px;
+                    background: #162032;
+                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "✕"; color: #CBD5E1; font-size: 16px; vertical-alignment: center; } Text { text: "Exit to Desktop (Esc)"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
+                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("exit"); } }
                 }
 
-                // Option 3: Restart PC
                 Rectangle {
-                    height: 54px;
-                    border-radius: 12px;
-                    background: #131E33;
-                    border-width: 1px;
-                    border-color: Theme.border-subtle;
-
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        spacing: 12px;
-
-                        Text { text: "↻"; color: Theme.text-secondary; font-size: 18px; vertical-alignment: center; }
-                        Text {
-                            text: "Restart Laptop";
-                            color: #FFFFFF;
-                            font-size: Theme.font-small;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            root.show_power_menu = false;
-                            root.power_action("restart");
-                        }
-                    }
+                    height: 48px;
+                    border-radius: 10px;
+                    background: #162032;
+                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "↻"; color: #F59E0B; font-size: 16px; vertical-alignment: center; } Text { text: "Restart PC"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
+                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("restart"); } }
                 }
 
-                // Option 4: Shut Down PC
                 Rectangle {
-                    height: 54px;
-                    border-radius: 12px;
-                    background: #131E33;
+                    height: 48px;
+                    border-radius: 10px;
+                    background: #2D1418;
                     border-width: 1px;
-                    border-color: Theme.border-subtle;
-
-                    HorizontalLayout {
-                        padding-left: 20px;
-                        spacing: 12px;
-
-                        Text { text: "⏻"; color: Theme.accent-warm; font-size: 18px; vertical-alignment: center; }
-                        Text {
-                            text: "Shut Down Laptop";
-                            color: Theme.accent-warm;
-                            font-size: Theme.font-small;
-                            font-weight: 800;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => {
-                            root.show_power_menu = false;
-                            root.power_action("shutdown");
-                        }
-                    }
+                    border-color: #EF444460;
+                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "⏻"; color: #EF4444; font-size: 16px; vertical-alignment: center; } Text { text: "Shut Down PC"; color: #EF4444; font-size: 13px; font-weight: 800; vertical-alignment: center; } }
+                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("shutdown"); } }
                 }
             }
         }
     }
 
-    // GAME MODE GATEWAY & PERFORMANCE WARNING MODAL OVERLAY
+    // 3. GAME MODE GATEWAY & PERFORMANCE MODAL
     if (root.show_game_mode_prompt): Rectangle {
         width: 100%;
         height: 100%;
-        background: #03060FE8;
+        background: #03060FE4;
 
-        // Prevent click-through
         TouchArea {}
 
-        // Modal Window Card
         Rectangle {
-            width: 780px;
-            height: 530px;
-            border-radius: Theme.radius-xl + 6px;
-            background: @linear-gradient(180deg, #121828 0%, #0B0F1A 100%);
+            width: 740px;
+            height: 490px;
+            border-radius: 18px;
+            background: @linear-gradient(180deg, #121828 0%, #0A0E18 100%);
             border-width: 2px;
-            border-color: root.opt_completed ? #30D158 : Theme.border-focus;
-            drop-shadow-blur: Theme.e3-blur;
-            drop-shadow-offset-y: Theme.e3-offset;
-            drop-shadow-color: Theme.e3-color;
+            border-color: root.opt_completed ? #10B981 : #00D2FF80;
+            drop-shadow-blur: 32px;
+            drop-shadow-color: #000000;
             clip: true;
 
             VerticalLayout {
-                padding: 30px;
-                spacing: 18px;
+                padding: 28px;
+                spacing: 16px;
                 alignment: space-between;
 
-                // Header with Badge
+                // Header
                 HorizontalLayout {
                     alignment: space-between;
-
                     VerticalLayout {
-                        spacing: 6px;
+                        spacing: 4px;
                         HorizontalLayout {
-                            spacing: 10px;
-                            Rectangle {
-                                width: 34px;
-                                height: 34px;
-                                border-radius: 9px;
-                                background: #00D2FF25;
-                                border-width: 1px;
-                                border-color: Theme.accent;
-                                y: 3px;
-                                Text {
-                                    text: "⚡";
-                                    font-size: 18px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            Text {
-                                text: "KILN CONSOLE GAME MODE";
-                                color: Theme.accent;
-                                font-size: Theme.font-title;
-                                font-weight: 900;
-                                letter-spacing: 1.2px;
-                                vertical-alignment: center;
-                            }
+                            spacing: 8px;
+                            Text { text: "⚡"; color: #00D2FF; font-size: 18px; vertical-alignment: center; }
+                            Text { text: "KILN CONSOLE GAME MODE"; color: #00D2FF; font-size: 18px; font-weight: 900; letter-spacing: 1px; vertical-alignment: center; }
                         }
-                        Text {
-                            text: "Optimize hardware priorities and RAM headroom for maximum gaming performance";
-                            color: Theme.text-subtle;
-                            font-size: Theme.font-small;
-                        }
+                        Text { text: "Dedicating maximum GPU, CPU, and RAM exclusively to gaming"; color: #94A3B8; font-size: 12px; }
                     }
-
                     if (!root.is_optimizing): Rectangle {
-                        width: 34px;
-                        height: 34px;
-                        border-radius: 17px;
-                        background: #FFFFFF10;
-                        Text {
-                            text: "✕";
-                            color: #FFFFFF80;
-                            font-size: 14px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.dismiss_game_mode_prompt(); }
-                        }
+                        width: 32px; height: 32px; border-radius: 16px; background: #FFFFFF10;
+                        Text { text: "✕"; color: #FFFFFF80; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
                     }
                 }
 
-                // Middle Content
+                // Info Cards
                 if (!root.is_optimizing && !root.opt_completed): VerticalLayout {
-                    spacing: 14px;
+                    spacing: 12px;
 
-                    // Warning Box (Closing consumer apps)
                     Rectangle {
-                        height: 114px;
-                        border-radius: Theme.radius-lg;
+                        height: 100px;
+                        border-radius: 10px;
                         background: #1C1214;
                         border-width: 1px;
                         border-color: #FF453A40;
 
                         HorizontalLayout {
-                            padding: 16px;
-                            spacing: 16px;
-                            alignment: start;
-
-                            Text {
-                                text: "⚠️";
-                                font-size: 28px;
-                                vertical-alignment: center;
-                            }
-
+                            padding: 14px;
+                            spacing: 14px;
+                            Text { text: "⚠️"; font-size: 24px; vertical-alignment: center; }
                             VerticalLayout {
-                                spacing: 4px;
+                                spacing: 3px;
                                 alignment: center;
-                                Text {
-                                    text: "PLEASE SAVE YOUR WORK IN OTHER APPS";
-                                    color: #FF6961;
-                                    font-size: Theme.font-body;
-                                    font-weight: 800;
-                                }
-                                Text {
-                                    text: "Entering Game Mode terminates unnecessary consumer applications (browsers, chat apps, code editors, cloud sync, and media players) to release system RAM and CPU priorities exclusively to your games.";
-                                    color: #D1D5DB;
-                                    font-size: Theme.font-small;
-                                    wrap: word-wrap;
-                                }
+                                Text { text: "PLEASE SAVE YOUR WORK IN OTHER APPS"; color: #FF6961; font-size: 13px; font-weight: 800; }
+                                Text { text: "Game Mode terminates unnecessary background apps (browsers, chat, code editors, media players) to reclaim physical RAM and minimize system latency."; color: #CBD5E1; font-size: 11px; wrap: word-wrap; }
                             }
                         }
                     }
 
-                    // Safety Packet Box
                     Rectangle {
-                        height: 114px;
-                        border-radius: Theme.radius-lg;
+                        height: 100px;
+                        border-radius: 10px;
                         background: #0D1C16;
                         border-width: 1px;
-                        border-color: #30D15840;
+                        border-color: #10B98140;
 
                         HorizontalLayout {
-                            padding: 16px;
-                            spacing: 16px;
-                            alignment: start;
-
-                            Text {
-                                text: "🛡️";
-                                font-size: 28px;
-                                vertical-alignment: center;
-                            }
-
+                            padding: 14px;
+                            spacing: 14px;
+                            Text { text: "🛡️"; font-size: 24px; vertical-alignment: center; }
                             VerticalLayout {
-                                spacing: 4px;
+                                spacing: 3px;
                                 alignment: center;
-                                Text {
-                                    text: "SAFETY PACKET GUARANTEE (0% Corruption Risk)";
-                                    color: #34D399;
-                                    font-size: Theme.font-body;
-                                    font-weight: 800;
-                                }
-                                Text {
-                                    text: "Windows Kernel, File Systems, Storage Drivers, Audio, Display Compositor, Defender, and Anti-Cheat Engines are strictly protected under the Kiln Safety Packet and will NEVER be touched.";
-                                    color: #D1D5DB;
-                                    font-size: Theme.font-small;
-                                    wrap: word-wrap;
-                                }
+                                Text { text: "SAFETY PACKET (0% Corruption Guarantee)"; color: #34D399; font-size: 13px; font-weight: 800; }
+                                Text { text: "Windows Kernel, File Systems, Storage Drivers, Audio, Display, Defender, and Anti-Cheat Engines are strictly protected and will NEVER be touched."; color: #CBD5E1; font-size: 11px; wrap: word-wrap; }
                             }
                         }
                     }
                 }
 
-                // Optimizing Progress View
+                // Progress View
                 if (root.is_optimizing): VerticalLayout {
-                    spacing: 24px;
+                    spacing: 20px;
                     alignment: center;
 
-                    Text {
-                        text: "OPTIMIZING SYSTEM HARDWARE";
-                        color: #FFFFFF;
-                        font-size: Theme.font-title;
-                        font-weight: 900;
-                        horizontal-alignment: center;
-                    }
+                    Text { text: "OPTIMIZING SYSTEM HARDWARE"; color: #FFFFFF; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
+                    Text { text: root.opt_status_text; color: #00D2FF; font-size: 13px; horizontal-alignment: center; }
 
-                    Text {
-                        text: root.opt_status_text;
-                        color: Theme.accent;
-                        font-size: Theme.font-body;
-                        horizontal-alignment: center;
-                    }
-
-                    // Progress track
                     Rectangle {
-                        height: 12px;
-                        border-radius: 6px;
-                        background: #1B2438;
-                        border-width: 1px;
-                        border-color: #2F3E5E;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: #1E293B;
                         clip: true;
-
-                        Rectangle {
-                            x: 0px;
-                            width: root.opt_progress * parent.width;
-                            height: 100%;
-                            background: @linear-gradient(90deg, #00D2FF 0%, #3B82F6 100%);
-                            border-radius: 6px;
-                        }
+                        Rectangle { x: 0px; width: root.opt_progress * parent.width; height: 100%; background: @linear-gradient(90deg, #00D2FF 0%, #3B82F6 100%); }
                     }
                 }
 
-                // Optimization Completed View
+                // Completed View
                 if (root.opt_completed): VerticalLayout {
-                    spacing: 18px;
+                    spacing: 14px;
                     alignment: center;
 
-                    Rectangle {
-                        width: 60px;
-                        height: 60px;
-                        border-radius: 30px;
-                        background: #10B98125;
-                        border-width: 2px;
-                        border-color: #10B981;
-                        x: (parent.width - self.width) / 2;
-
-                        Text {
-                            text: "✓";
-                            color: #10B981;
-                            font-size: 28px;
-                            font-weight: 900;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    Text {
-                        text: "CONSOLE GAME MODE ACTIVATED";
-                        color: #FFFFFF;
-                        font-size: Theme.font-title;
-                        font-weight: 900;
-                        horizontal-alignment: center;
-                    }
-
-                    Text {
-                        text: root.opt_report_text != "" ? root.opt_report_text : "1,420 MB RAM Reclaimed • Background Consumer Tasks Cleaned";
-                        color: #34D399;
-                        font-size: Theme.font-headline;
-                        font-weight: 800;
-                        horizontal-alignment: center;
-                    }
-
-                    Text {
-                        text: "CPU execution priority dedicated to games. System ready.";
-                        color: Theme.text-subtle;
-                        font-size: Theme.font-small;
-                        horizontal-alignment: center;
-                    }
+                    Text { text: "✓ CONSOLE GAME MODE ACTIVE"; color: #10B981; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
+                    Text { text: root.opt_report_text != "" ? root.opt_report_text : "1,420 MB RAM Reclaimed • Tasks Optimized"; color: #FFFFFF; font-size: 16px; font-weight: 800; horizontal-alignment: center; }
+                    Text { text: "System latency minimized. Physical memory dedicated to games."; color: #94A3B8; font-size: 12px; horizontal-alignment: center; }
                 }
 
-                // Action Footer Buttons
+                // Footer Buttons
                 HorizontalLayout {
-                    spacing: 16px;
+                    spacing: 14px;
                     alignment: end;
 
                     if (!root.is_optimizing && !root.opt_completed): HorizontalLayout {
-                        spacing: 16px;
+                        spacing: 14px;
 
-                        // Skip / Continue button
                         Rectangle {
-                            width: 250px;
-                            height: 52px;
-                            border-radius: Theme.radius-lg;
-                            background: #162032;
+                            width: 220px;
+                            height: 46px;
+                            border-radius: 10px;
+                            background: #1E293B80;
                             border-width: 1px;
-                            border-color: Theme.border;
-
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 8px;
-                                Text {
-                                    text: "Continue Windowed (Esc)";
-                                    color: #D1D5DB;
-                                    font-size: Theme.font-small;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.dismiss_game_mode_prompt(); }
-                            }
+                            border-color: #334155;
+                            HorizontalLayout { alignment: center; Text { text: "Continue Windowed (Esc)"; color: #CBD5E1; font-size: 12px; font-weight: 700; vertical-alignment: center; } }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
                         }
 
-                        // Activate button
                         Rectangle {
-                            width: 280px;
-                            height: 52px;
-                            border-radius: Theme.radius-lg;
-                            background: @linear-gradient(135deg, Theme.accent 0%, #0088CC 100%);
-                            border-width: 1px;
-                            border-color: #88EEFF;
-
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 8px;
-                                Text {
-                                    text: "⚡ Activate Game Mode (Enter)";
-                                    color: #050A14;
-                                    font-size: Theme.font-small;
-                                    font-weight: 900;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.trigger_game_mode_optimization(); }
-                            }
+                            width: 240px;
+                            height: 46px;
+                            border-radius: 10px;
+                            background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
+                            HorizontalLayout { alignment: center; Text { text: "⚡ Activate Game Mode (Enter)"; color: #050A14; font-size: 12px; font-weight: 900; vertical-alignment: center; } }
+                            TouchArea { mouse-cursor: pointer; clicked => { root.trigger_game_mode_optimization(); } }
                         }
                     }
 
                     if (root.opt_completed): Rectangle {
-                        width: 280px;
-                        height: 52px;
-                        border-radius: Theme.radius-lg;
+                        width: 240px;
+                        height: 46px;
+                        border-radius: 10px;
                         background: @linear-gradient(135deg, #10B981 0%, #059669 100%);
-                        border-width: 1px;
-                        border-color: #6EE7B7;
-
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: 8px;
-                            Text {
-                                text: "Enter Dashboard (Enter)";
-                                color: #FFFFFF;
-                                font-size: Theme.font-body;
-                                font-weight: 900;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.dismiss_game_mode_prompt(); }
-                        }
+                        HorizontalLayout { alignment: center; Text { text: "Enter Dashboard (Enter)"; color: #FFFFFF; font-size: 13px; font-weight: 900; vertical-alignment: center; } }
+                        TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
                     }
                 }
             }

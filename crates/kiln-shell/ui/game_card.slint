@@ -11,15 +11,15 @@ export component GameCard inherits Rectangle {
     callback clicked();
     callback detail_requested();
 
-    width: is_card_focused ? 226px : 206px;
-    height: is_card_focused ? 339px : 309px;
+    width: is_card_focused ? 212px : 192px;
+    height: is_card_focused ? 318px : 288px;
     background: is_card_focused ? Theme.surface-card-focused : Theme.surface-card;
-    border-radius: Theme.radius-xl;
-    border-width: is_card_focused ? 3px : 1px;
-    border-color: is_card_focused ? Theme.focus : Theme.border;
-    drop-shadow-blur: is_card_focused ? Theme.e2-blur : Theme.e1-blur;
-    drop-shadow-offset-y: is_card_focused ? Theme.e2-offset : Theme.e1-offset;
-    drop-shadow-color: is_card_focused ? Theme.e2-color : Theme.e1-color;
+    border-radius: Theme.radius-lg;
+    border-width: is_card_focused ? 2px : 1px;
+    border-color: is_card_focused ? Theme.focus : Theme.border-subtle;
+    drop-shadow-blur: is_card_focused ? 16px : 6px;
+    drop-shadow-offset-y: is_card_focused ? 6px : 2px;
+    drop-shadow-color: is_card_focused ? #00D2FF40 : #00000070;
     clip: true;
 
     accessible-role: button;
