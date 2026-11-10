@@ -26,6 +26,7 @@ tempfile.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
-
-[target.'cfg(windows)'.build-dependencies]
+# Embeds the Windows icon. A plain build-dependency (not cfg(windows)): build scripts run on
+# the host, and CI cross-builds the Windows exe from Linux. build.rs only uses it when the
+# *target* is Windows.
 winresource = "0.1.34"
