@@ -1,114 +1,154 @@
-// Design tokens for Kiln 10-foot TV UI.
-// Built according to rust-ui-ux skill specifications and WCAG 2.x AA contrast rules.
+// Kiln design tokens: the ONLY place colours, sizes, fonts and motion are defined.
+// Widget code references these semantic tokens; never hard-code values elsewhere.
+//
+// Scaling model
+//   viewport-scale  set by MainWindow from the window size (1.0 at 1920x1080 logical)
+//   ui-scale        user setting "Interface size"
+//   text-scale      user setting "Text size" (multiplies on top of k for type only)
+//   k  = viewport-scale * ui-scale      -> spacing, radii, control and tile sizes
+//   kt = k * text-scale                 -> font sizes
+// Every length token below is a 1080p base value multiplied by k or kt, so the whole UI
+// reflows proportionally on any screen and responds live to the Settings sliders.
+//
+// Fonts
+//   font-preset picks a family set; family-ui / family-display / family-mono are what widgets use.
+//   To add or change a font, edit the tables in this file only.
+
 export global Theme {
-    in-out property <bool> dark: true;
+    // ---------------------------------------------------------------- settings inputs
+    in-out property <float> viewport-scale: 1.0;
+    in-out property <length> viewport-width: 1920px;
+    in-out property <length> viewport-height: 1080px;
+    in-out property <float> ui-scale: 1.0;       // 0.8 .. 1.4
+    in-out property <float> text-scale: 1.0;     // 0.9 .. 1.3
+    in-out property <int> tile-size: 1;          // 0 small, 1 medium, 2 large
+    in-out property <int> safe-area: 0;          // extra TV overscan margin, percent 0..5
+    in-out property <int> font-preset: 0;        // index into font tables below
+    in-out property <bool> animations: true;
 
-    // Atmospheric Surfaces (Obsidian Basalt)
-    out property <color> bg: dark ? #07090E : #f4f7fc;
-    out property <color> surface: dark ? #111722 : #ffffff;
-    out property <color> surface-raised: dark ? #192234 : #ecf1f7;
-    out property <color> surface-card: dark ? #131B2B : #ffffff;
-    out property <color> surface-card-focused: dark ? #1D2A44 : #f0f6ff;
-    out property <color> surface-glass: dark ? #0A101DF0 : #fffffff2;
+    out property <float> k: viewport-scale * ui-scale;
+    out property <float> kt: k * text-scale;
 
-    // Structural Borders
-    out property <color> border: dark ? #233047 : #dce2e9;
-    out property <color> border-strong: dark ? #36486B : #888d94;
-    out property <color> border-focus: dark ? #00D2FF : #007799;
+    // Layout modes, derived from how much room the chosen sizes leave on this screen.
+    // compact-h: header drops the wordmark and the LB/RB caps.
+    // compact-v: spotlight drops the eyebrow/stats and the shelf heading.
+    out property <bool> compact-h: viewport-width < 1600px * kt;
+    out property <bool> compact-v: viewport-height < 1000px * kt;
 
-    // Typographic Hierarchy (WCAG AA compliant contrast)
-    out property <color> text: dark ? #F0F4F8 : #171b20;
-    out property <color> text-muted: dark ? #8A98AC : #5f646a;
-    out property <color> text-subtle: dark ? #8A98AC : #5f646a;
-    out property <color> text-disabled: dark ? #4A5668 : #9a9fa6;
+    // ---------------------------------------------------------------- fonts
+    // Preset 0 ships with the app (Inter + JetBrains Mono, see assets/fonts).
+    // Presets 1-2 use fonts bundled with Windows 11.
+    out property <int> font-preset-count: 3;
+    out property <[string]> font-preset-names: ["Inter", "Bahnschrift", "Segoe UI Variable"];
+    out property <string> family-ui: font-preset == 1 ? "Bahnschrift"
+        : font-preset == 2 ? "Segoe UI Variable Text" : "Inter";
+    out property <string> family-display: font-preset == 1 ? "Bahnschrift"
+        : font-preset == 2 ? "Segoe UI Variable Display" : "Inter";
+    out property <string> family-mono: "JetBrains Mono";
+    out property <string> family-icons: "lucide";
 
-    // Primary Accents (Electric Cyan)
-    out property <color> accent: dark ? #00D2FF : #0088AA;
-    out property <color> accent-hover: dark ? #26DCFF : #007799;
-    out property <color> on-accent: dark ? #07090E : #ffffff;
-    out property <color> accent-fg: dark ? #00D2FF : #007799;
-    out property <color> accent-subtle: dark ? #0B2535 : #e6faff;
-    out property <color> focus: dark ? #00D2FF : #0088AA;
+    out property <int> weight-regular: 400;
+    out property <int> weight-medium: 500;
+    out property <int> weight-semibold: 600;
 
-    // Semantic Status Colors
-    out property <color> success: dark ? #47A05F : #1d7d3e;
-    out property <color> success-subtle: dark ? #192925 : #ebf4ee;
-    out property <color> warning: dark ? #F59E0B : #b45309;
-    out property <color> warning-subtle: dark ? #2B2314 : #fef3c7;
-    out property <color> danger: dark ? #EF4444 : #b91c1c;
-    out property <color> danger-subtle: dark ? #2E1A1A : #fee2e2;
+    // ---------------------------------------------------------------- colour themes
+    // theme-preset picks the surface/text ramp, accent-preset the single accent hue.
+    // To add a theme or accent: append a name below and one value per token. Every pairing
+    // was checked for WCAG AA (text 4.5:1, controls 3:1).
+    in-out property <int> theme-preset: 0;   // 0 Slate, 1 Graphite, 2 Midnight
+    in-out property <int> accent-preset: 0;  // index into accent-names
+    out property <[string]> theme-names: ["Slate", "Graphite", "Midnight"];
+    out property <[string]> accent-names: ["Orange", "Amber", "Red", "Rose", "Violet", "Blue", "Teal", "Green"];
+    out property <[color]> accent-swatches: [#F97316, #F59E0B, #EF4444, #F43F5E, #A78BFA, #60A5FA, #2DD4BF, #4ADE80];
+    property <[color]> accent-hovers: [#FB8B3F, #F7B13D, #F26363, #F6617B, #B9A2FB, #7DB5FB, #4FDCCB, #6BE498];
+    property <[color]> accent-texts: [#FF8B42, #FBBF24, #FF7A72, #FF7A8F, #B9A2FB, #7DB5FB, #4FDCCB, #6BE498];
 
-    // Kiln Console Brand & Launchers
-    out property <color> accent-warm: #FF5533; // Ember flame
-    out property <color> accent-gold: #FBBF24; // Star gold
-    out property <color> steam-color: #1A78C2;
-    out property <color> epic-color: #2D3748;
-    out property <color> xbox-color: #107C10;
-    out property <color> standalone-color: #8B5CF6;
+    // Surfaces get lighter as they rise: bg -> surface-1 -> ... -> surface-4.
+    out property <color> bg: theme-preset == 1 ? #0B0B0D : theme-preset == 2 ? #060A14 : #0A0D12;
+    out property <color> surface-1: theme-preset == 1 ? #121215 : theme-preset == 2 ? #0B1121 : #10141B;
+    out property <color> surface-2: theme-preset == 1 ? #19191D : theme-preset == 2 ? #10182C : #161B24;
+    out property <color> surface-3: theme-preset == 1 ? #222227 : theme-preset == 2 ? #17223A : #1E2530;
+    out property <color> surface-4: theme-preset == 1 ? #2D2D33 : theme-preset == 2 ? #202D48 : #283140;
+    out property <color> glass: surface-1.transparentize(0.15);   // panels over artwork
+    out property <color> scrim: #000000B8;                         // behind modals
 
-    // Controller Buttons (Xbox physical colorway)
-    out property <color> btn-a: #10B981; // Green
-    out property <color> btn-b: #EF4444; // Red
-    out property <color> btn-x: #3B82F6; // Blue
-    out property <color> btn-y: #F59E0B; // Yellow
-    out property <color> btn-bumper: #334155; // Slate
+    out property <color> border: theme-preset == 1 ? #26262B : theme-preset == 2 ? #1B2640 : #232A36;
+    out property <color> border-strong: theme-preset == 1 ? #3E3E45 : theme-preset == 2 ? #33435F : #3A4454;
 
-    // 10-Foot Safe Overscan Margins
-    out property <length> safe-margin-h: 72px;
-    out property <length> safe-margin-v: 40px;
+    out property <color> text: theme-preset == 1 ? #EFEFF1 : theme-preset == 2 ? #EDF1F9 : #EEF1F5;
+    out property <color> text-muted: theme-preset == 1 ? #ABABB3 : theme-preset == 2 ? #A2AEC6 : #A4ADBB;
+    out property <color> text-faint: theme-preset == 1 ? #78787F : theme-preset == 2 ? #6C7891 : #737D8C; // decorative / large text only
+    out property <color> text-disabled: theme-preset == 1 ? #505057 : theme-preset == 2 ? #46526A : #4E5766;
 
-    // Spacing Scale (2 / 4 / 8 / 12 / 16 / 24 / 32 / 48)
-    out property <length> space-xxs: 2px;
-    out property <length> space-xs: 4px;
-    out property <length> space-sm: 8px;
-    out property <length> space-md: 12px;
-    out property <length> space-lg: 16px;
-    out property <length> space-xl: 24px;
-    out property <length> space-xxl: 32px;
-    out property <length> space-xxxl: 48px;
+    // ---------------------------------------------------------------- colour: accent
+    // accent = fills, accent-fg = accent text/icons on surfaces.
+    out property <color> accent: accent-swatches[accent-preset];
+    out property <color> accent-hover: accent-hovers[accent-preset];
+    out property <color> accent-fg: accent-texts[accent-preset];
+    out property <color> on-accent: #0A0D12;
+    out property <color> accent-subtle: accent.transparentize(0.88);
+    out property <color> accent-glow: accent.transparentize(0.65);
+    out property <color> focus: accent;
 
-    // Radii Scale (Concentric)
-    out property <length> radius-sm: 4px;
-    out property <length> radius-md: 6px;
-    out property <length> radius-lg: 10px;
-    out property <length> radius-xl: 14px;
+    // ---------------------------------------------------------------- colour: status
+    out property <color> success: #4CB873;
+    out property <color> warning: #E0A43C;
+    out property <color> warning-subtle: #E0A43C1A;
+    out property <color> danger: #EF6A5F;
+    out property <color> danger-subtle: #EF6A5F1A;
+
+    // ---------------------------------------------------------------- spacing (1080p base x k)
+    out property <length> space-xxs: 4px * k;
+    out property <length> space-xs: 8px * k;
+    out property <length> space-sm: 12px * k;
+    out property <length> space-md: 16px * k;
+    out property <length> space-lg: 24px * k;
+    out property <length> space-xl: 32px * k;
+    out property <length> space-xxl: 48px * k;
+    out property <length> space-xxxl: 64px * k;
+
+    // Screen edge margins: base TV-safe margin plus the user's extra overscan percentage.
+    out property <length> margin-x: 72px * k + viewport-width * safe-area / 100;
+    out property <length> margin-y: 40px * k + viewport-height * safe-area / 100;
+
+    // ---------------------------------------------------------------- radii
+    out property <length> radius-sm: 6px * k;
+    out property <length> radius-md: 10px * k;
+    out property <length> radius-lg: 14px * k;
+    out property <length> radius-xl: 20px * k;
     out property <length> radius-full: 999px;
 
-    // Font Scale
-    out property <length> font-caption: 12px;
-    out property <length> font-small: 14px;
-    out property <length> font-body: 16px;
-    out property <length> font-body-lg: 18px;
-    out property <length> font-title: 22px;
-    out property <length> font-headline: 28px;
-    out property <length> font-display: 36px;
+    // ---------------------------------------------------------------- type (1080p base x kt)
+    out property <length> font-caption: 17px * kt;
+    out property <length> font-small: 19px * kt;
+    out property <length> font-body: 22px * kt;
+    out property <length> font-body-lg: 26px * kt;
+    out property <length> font-title: 32px * kt;
+    out property <length> font-headline: 44px * kt;
+    // Hero title: grows with text size but never past ~6.5% of the screen height.
+    out property <length> font-display: min(64px * kt, viewport-height * 0.065);
+    out property <length> tracking-wide: 2.5px * kt;   // eyebrow labels
+    out property <length> tracking-tight: -0.5px * kt; // large display titles
 
-    // Elevation Shadows
-    out property <length> e1-blur: 4px;
-    out property <length> e1-offset: 2px;
-    out property <color> e1-color: #00000040;
+    // ---------------------------------------------------------------- controls
+    out property <length> control-height: 64px * k;
+    out property <length> control-height-sm: 48px * k;
+    out property <length> icon-sm: 20px * kt;
+    out property <length> icon-md: 26px * kt;
+    out property <length> icon-lg: 56px * k;
+    out property <length> focus-ring: 3px * k;
+    out property <length> hairline: 1px;
 
-    out property <length> e2-blur: 16px;
-    out property <length> e2-offset: 6px;
-    out property <color> e2-color: #00000060;
+    // ---------------------------------------------------------------- game tiles (2:3 posters)
+    // Width from the size setting, capped so a tile is never taller than ~34% of the screen.
+    out property <length> tile-width: min((tile-size == 0 ? 176px : tile-size == 2 ? 264px : 216px) * k,
+        viewport-height * 0.34 / 1.5);
+    out property <length> tile-height: tile-width * 1.5;
+    out property <length> tile-gap: 20px * k;
+    out property <length> tile-lift: 10px * k;
 
-    out property <length> e3-blur: 32px;
-    out property <length> e3-offset: 12px;
-    out property <color> e3-color: #00000080;
-
-    // Motion Timing
-    out property <duration> motion-fast: 120ms;
-    out property <duration> motion-normal: 160ms;
-    out property <duration> motion-slow: 240ms;
-
-    // Convenience aliases
-    out property <color> background: bg;
-    out property <color> surface-variant: surface-raised;
-    out property <color> border-subtle: border;
-    out property <color> border-highlight: border-strong;
-    out property <color> text-primary: text;
-    out property <color> text-secondary: text-muted;
-    out property <length> font-badge: font-caption;
-    out property <length> font-hero: font-display;
-    out property <color> accent-glow: accent-hover;
+    // ---------------------------------------------------------------- motion
+    out property <duration> motion-fast: animations ? 120ms : 0ms;
+    out property <duration> motion-normal: animations ? 180ms : 0ms;
+    out property <duration> motion-slow: animations ? 260ms : 0ms;
 }

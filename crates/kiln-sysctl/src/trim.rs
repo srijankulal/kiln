@@ -347,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "changes real system settings; run manually on a test machine"]
     fn test_process_trimmer_lifecycle() {
         let trimmer = WindowsProcessTrimmer::new();
         let my_pid = std::process::id();

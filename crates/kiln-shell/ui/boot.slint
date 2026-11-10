@@ -1,0 +1,155 @@
+// Loading screen shown after the startup screen, while Kiln closes apps and moves to the
+// chosen screen. Plays with the startup chime (src/sound.rs, Cue::Boot): the bar fills when
+// the chime's final chord lands (~1.9 s), then the screen fades into the library.
+import { Theme } from "theme.slint";
+import { Logo } from "logo.slint";
+
+component Ring inherits Rectangle {
+    in property <bool> go;
+    in property <length> from;
+    in property <length> to;
+    in property <duration> delay;
+    in property <length> host-width;
+    in property <length> host-height;
+    width: go ? to : from;
+    height: self.width;
+    x: (host-width - self.width) / 2;
+    y: (host-height - self.height) / 2;
+    border-radius: self.width / 2;
+    border-width: 2px * Theme.k;
+    border-color: Theme.accent;
+    opacity: go ? 0 : 0.55;
+    animate width, opacity {
+        delay: Theme.animations ? delay : 0ms;
+        duration: Theme.animations ? 1600ms : 0ms;
+        easing: ease-out;
+    }
+}
+
+export component BootScreen inherits Rectangle {
+    in property <string> status;
+    // Work finished: the bar fills and the status turns into the summary.
+    in property <bool> done;
+    // Fade out to reveal the library.
+    in property <bool> leaving;
+    // Set by Rust once the window has settled on its screen: starts the animation.
+    // Until then the screen is a plain backdrop, so a resize can't cut into the motion.
+    in property <bool> playing;
+
+    property <bool> entered: root.playing;
+    property <duration> fade: Theme.animations ? 450ms : 0ms;
+    property <length> logo: 160px * Theme.k;
+    // The chevron lights up shortly after the mark appears, with the chime's first notes.
+    property <float> ignite: root.entered ? 1 : 0;
+    animate ignite { delay: Theme.animations ? 250ms : 0ms; duration: Theme.animations ? 900ms : 0ms; easing: ease-out; }
+    property <length> cy: self.height * 0.42;
+    property <float> breath: Theme.animations ? 0.5 + 0.5 * sin(animation-tick() / 1ms * 0.12deg) : 1;
+    property <float> sweep: Theme.animations ? 0.5 + 0.5 * sin(animation-tick() / 1ms * 0.2deg) : 0;
+
+    background: Theme.bg;
+    opacity: leaving ? 0 : 1;
+    animate opacity { duration: root.fade; easing: ease-in; }
+
+    // Swallow pointer input while loading.
+    TouchArea {}
+
+    // Accent glow behind the mark, breathing while work is in progress.
+    Rectangle {
+        width: 900px * Theme.k;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: root.cy - self.height / 2;
+        // Fades out by 70% so the square bounds never show.
+        background: @radial-gradient(circle, Theme.accent.transparentize(0.86) 0%, Theme.accent.transparentize(1) 70%);
+        opacity: !root.entered ? 0 : root.done ? 1 : 0.55 + 0.45 * root.breath;
+        animate opacity { duration: Theme.animations ? 900ms : 0ms; easing: ease-out; }
+    }
+
+    // Rings ripple out from the mark once on entry.
+    Rectangle {
+        x: 0px;
+        y: root.cy - self.height / 2;
+        width: parent.width;
+        height: 640px * Theme.k;
+        for i in 3: Ring {
+            host-width: root.width;
+            host-height: 640px * Theme.k;
+            go: root.entered;
+            from: root.logo;
+            to: root.logo * (3.4 + i * 1.3);
+            delay: i * 260ms;
+        }
+    }
+
+    // The mark.
+    Logo {
+        size: root.logo;
+        x: (parent.width - self.width) / 2;
+        y: root.cy - self.height / 2;
+        glow: root.ignite * (root.done ? 1 : 0.7 + 0.3 * root.breath);
+        transform-scale: root.entered ? 100% : 86%;
+        opacity: root.entered ? 1 : 0;
+        animate transform-scale {
+            duration: Theme.animations ? 700ms : 0ms;
+            easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        animate opacity { duration: Theme.animations ? 300ms : 0ms; }
+    }
+
+    // Wordmark, status and progress below the mark.
+    VerticalLayout {
+        x: 0px;
+        y: root.cy + root.logo / 2 + Theme.space-xl;
+        width: parent.width;
+        spacing: Theme.space-md;
+        alignment: start;
+
+        Text {
+            text: "KILN";
+            horizontal-alignment: center;
+            font-family: Theme.family-display;
+            font-size: 44px * Theme.kt;
+            font-weight: Theme.weight-semibold;
+            color: Theme.text;
+            letter-spacing: root.entered ? 16px * Theme.kt : 36px * Theme.kt;
+            opacity: root.entered ? 1 : 0;
+            animate letter-spacing { delay: Theme.animations ? 150ms : 0ms; duration: Theme.animations ? 1100ms : 0ms; easing: ease-out; }
+            animate opacity { delay: Theme.animations ? 150ms : 0ms; duration: Theme.animations ? 700ms : 0ms; easing: ease-out; }
+        }
+
+        Text {
+            text: root.status;
+            horizontal-alignment: center;
+            color: Theme.text-muted;
+            font-size: Theme.font-body;
+            overflow: elide;
+            opacity: root.entered ? 1 : 0;
+            animate opacity { delay: Theme.animations ? 450ms : 0ms; duration: Theme.animations ? 500ms : 0ms; }
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            padding-top: Theme.space-sm;
+            track := Rectangle {
+                width: 280px * Theme.k;
+                height: 4px * Theme.k;
+                border-radius: self.height / 2;
+                background: Theme.surface-2;
+                clip: true;
+                opacity: root.entered ? 1 : 0;
+                animate opacity { delay: Theme.animations ? 450ms : 0ms; duration: Theme.animations ? 500ms : 0ms; }
+
+                // Indeterminate sweep while working; fills the track when done.
+                Rectangle {
+                    property <length> seg: track.width * 0.32;
+                    width: root.done ? track.width : self.seg;
+                    x: root.done ? 0px : (track.width - self.seg) * root.sweep;
+                    height: parent.height;
+                    border-radius: self.height / 2;
+                    background: Theme.accent;
+                    animate width { duration: Theme.animations ? 500ms : 0ms; easing: ease-out; }
+                }
+            }
+        }
+    }
+}

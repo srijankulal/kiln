@@ -92,6 +92,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "changes real system settings; run manually on a test machine"]
     fn test_taskbar_api_lifecycle() {
         let taskbar = WindowsTaskbar::new();
         if let Ok(snapshot) = taskbar.snapshot_taskbar() {

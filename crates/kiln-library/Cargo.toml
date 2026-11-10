@@ -17,8 +17,10 @@ walkdir.workspace = true
 rusqlite.workspace = true
 image.workspace = true
 reqwest.workspace = true
+base64 = "0.22"
 
 [dev-dependencies]
+tokio.workspace = true
 tempfile.workspace = true
 
 [[bin]]

@@ -17,9 +17,15 @@ tracing.workspace = true
 clap.workspace = true
 slint.workspace = true
 image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+cpal.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 
 [build-dependencies]
 slint-build.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.34"

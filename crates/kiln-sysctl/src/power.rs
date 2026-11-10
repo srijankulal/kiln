@@ -247,6 +247,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "changes real system settings; run manually on a test machine"]
     fn test_power_api_lifecycle() {
         let power = WindowsPower::new();
         // In unprivileged or virtual CI environments without power schemes, gracefully handle absence

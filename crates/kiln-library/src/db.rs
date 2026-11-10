@@ -203,6 +203,13 @@ impl LibraryDatabase {
         Ok(is_fav != 0)
     }
 
+    /// Removes a game from the library (its files on disk are not touched).
+    pub fn delete_game(&self, id: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM games WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn get_game(&self, id: &str) -> Result<Option<DiscoveredGame>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, source, install_dir, exe, launch_kind, launch_target,

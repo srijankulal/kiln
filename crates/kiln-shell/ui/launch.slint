@@ -1,0 +1,602 @@
+// Startup screen: shown every time Kiln opens, before it goes full screen.
+// 1) which background apps to close (and which to always keep), 2) which screen to use.
+import { Theme } from "theme.slint";
+import { Logo } from "logo.slint";
+import { Icons } from "icons.slint";
+import { Icon, Button, SectionLabel } from "components.slint";
+
+export struct LaunchApp {
+    exe: string,
+    name: string,
+    category: string, // display label, e.g. "Browser", "Work"
+    processes: int,
+    close: bool,
+}
+
+export struct LaunchDisplay {
+    title: string,
+    detail: string,
+    external: bool,
+    available: bool,
+}
+
+component FocusBar inherits Rectangle {
+    in property <bool> on;
+    in property <length> host-height;
+    x: 0px;
+    y: (host-height - self.height) / 2;
+    width: 4px * Theme.k;
+    height: on ? host-height * 0.5 : 0px;
+    border-radius: self.width / 2;
+    background: Theme.accent;
+    animate height { duration: Theme.motion-normal; easing: ease-out; }
+}
+
+component Choice inherits Rectangle {
+    in property <string> text;
+    in property <bool> chosen;
+    in property <bool> emphasise; // chosen + accent styling
+    callback clicked();
+    height: 44px * Theme.k;
+    border-radius: Theme.radius-sm;
+    background: chosen ? (emphasise ? Theme.accent-subtle : Theme.surface-4) : (ta.has-hover ? Theme.surface-3 : transparent);
+    border-width: Theme.hairline;
+    border-color: chosen ? (emphasise ? Theme.accent : Theme.border-strong) : Theme.border;
+    accessible-role: radio-button;
+    accessible-checked: chosen;
+    accessible-label: root.text;
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        Text {
+            text: root.text;
+            color: root.chosen ? (root.emphasise ? Theme.accent-fg : Theme.text) : Theme.text-muted;
+            font-size: Theme.font-small;
+            font-weight: root.chosen ? Theme.weight-semibold : Theme.weight-regular;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component AppRow inherits Rectangle {
+    in property <string> name;
+    in property <string> category;
+    in property <int> processes;
+    in property <bool> close;
+    in property <bool> focused;
+    callback set-close(bool);
+    callback pointer-entered();
+
+    height: 40px * Theme.k + 48px * Theme.kt;
+    border-radius: Theme.radius-md;
+    background: focused ? Theme.surface-3 : (ta.has-hover ? Theme.surface-2 : transparent);
+    accessible-role: list-item;
+    accessible-label: root.name + (root.close ? ", will close" : ", stays open");
+    animate background { duration: Theme.motion-fast; }
+
+    ta := TouchArea {
+        changed has-hover => {
+            if self.has-hover { root.pointer-entered(); }
+        }
+    }
+    FocusBar { on: root.focused; host-height: root.height; }
+
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        spacing: Theme.space-md;
+
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 44px * Theme.k;
+                height: self.width;
+                border-radius: Theme.radius-sm;
+                background: Theme.surface-3;
+                Icon {
+                    size: Theme.icon-sm;
+                    color: root.close ? Theme.text : Theme.text-muted;
+                    glyph: root.category == "Browser" ? Icons.globe
+                        : root.category == "Chat" ? Icons.chat
+                        : root.category == "Media" ? Icons.music
+                        : root.category == "Work" ? Icons.briefcase
+                        : root.category == "Cloud sync" ? Icons.cloud
+                        : root.category == "Downloads" ? Icons.download
+                        : Icons.package;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-xxs;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            Text {
+                text: root.name;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: Theme.weight-semibold;
+                overflow: elide;
+            }
+            Text {
+                text: root.category + " · " + (root.processes == 1 ? "1 process" : root.processes + " processes");
+                color: Theme.text-muted;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+        }
+        HorizontalLayout {
+            spacing: Theme.space-xxs;
+            alignment: end;
+            VerticalLayout {
+                alignment: center;
+                Choice { text: "Close"; chosen: root.close; emphasise: true; clicked => { root.set-close(true); } }
+            }
+            VerticalLayout {
+                alignment: center;
+                Choice { text: "Keep"; chosen: !root.close; emphasise: false; clicked => { root.set-close(false); } }
+            }
+        }
+    }
+}
+
+component DisplayCard inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    in property <bool> external;
+    in property <bool> available;
+    in property <bool> selected;
+    in property <bool> focused;
+    callback choose();
+    callback pointer-entered();
+
+    height: 48px * Theme.k + 52px * Theme.kt;
+    border-radius: Theme.radius-lg;
+    background: selected ? Theme.accent-subtle : (ta.has-hover && available ? Theme.surface-2 : Theme.surface-1);
+    border-width: selected ? 2px * Theme.k : Theme.hairline;
+    border-color: selected ? Theme.accent : (focused ? Theme.border-strong : Theme.border);
+    opacity: available ? 1 : 0.55;
+    accessible-role: radio-button;
+    accessible-checked: root.selected;
+    accessible-label: root.title + ", " + root.detail;
+    animate background, border-color { duration: Theme.motion-fast; }
+
+    if root.focused: Rectangle {
+        x: -Theme.focus-ring * 2;
+        y: -Theme.focus-ring * 2;
+        width: parent.width + Theme.focus-ring * 4;
+        height: parent.height + Theme.focus-ring * 4;
+        border-radius: Theme.radius-lg + Theme.focus-ring * 2;
+        border-width: Theme.focus-ring;
+        border-color: Theme.text.transparentize(0.2);
+    }
+
+    ta := TouchArea {
+        mouse-cursor: root.available ? pointer : default;
+        changed has-hover => {
+            if self.has-hover { root.pointer-entered(); }
+        }
+        clicked => {
+            if root.available { root.choose(); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-lg;
+        padding-right: Theme.space-lg;
+        spacing: Theme.space-md;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 52px * Theme.k;
+                height: self.width;
+                border-radius: Theme.radius-md;
+                background: root.selected ? Theme.accent : Theme.surface-3;
+                Icon {
+                    glyph: root.external ? Icons.tv : Icons.laptop;
+                    size: Theme.icon-md;
+                    color: root.selected ? Theme.on-accent : Theme.text-muted;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-xxs;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            Text {
+                text: root.title;
+                color: Theme.text;
+                font-size: Theme.font-body-lg;
+                font-weight: Theme.weight-semibold;
+                overflow: elide;
+            }
+            Text {
+                text: root.detail;
+                color: Theme.text-muted;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+        }
+        // Radio indicator
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 28px * Theme.k;
+                height: self.width;
+                border-radius: self.width / 2;
+                border-width: 2px * Theme.k;
+                border-color: root.selected ? Theme.accent : Theme.border-strong;
+                Rectangle {
+                    width: parent.width * 0.5;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: Theme.accent;
+                    visible: root.selected;
+                }
+            }
+        }
+    }
+}
+
+component Checkbox inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> focused;
+    callback toggled();
+    callback pointer-entered();
+    height: 56px * Theme.k;
+    border-radius: Theme.radius-md;
+    background: focused ? Theme.surface-3 : transparent;
+    accessible-role: checkbox;
+    accessible-checked: root.checked;
+    accessible-label: root.text;
+    accessible-action-default => { root.toggled(); }
+    FocusBar { on: root.focused; host-height: root.height; }
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        spacing: Theme.space-sm;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 26px * Theme.k;
+                height: self.width;
+                border-radius: Theme.radius-sm;
+                background: root.checked ? Theme.accent : transparent;
+                border-width: 2px * Theme.k;
+                border-color: root.checked ? Theme.accent : Theme.border-strong;
+                if root.checked: Icon { glyph: Icons.check; size: Theme.icon-sm; color: Theme.on-accent; }
+            }
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: Theme.font-small;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        changed has-hover => {
+            if self.has-hover { root.pointer-entered(); }
+        }
+        clicked => { root.toggled(); }
+    }
+}
+
+export component LaunchScreen inherits Rectangle {
+    in property <[LaunchApp]> apps;
+    in property <[LaunchDisplay]> displays;
+    in property <int> display-choice;
+    in property <int> closing-count;
+    in property <int> inactive-external;
+    in property <bool> remember;
+    in property <int> focus-index;
+    in property <bool> busy;
+    in property <string> status;
+    in property <float> progress;
+    in property <bool> dismissable;
+    callback set-app-close(int, bool);
+    callback choose-display(int);
+    callback toggle-remember();
+    callback refresh();
+    callback start-clicked();
+    callback quit();
+    callback dismiss();
+    callback hover-focus(int);
+
+    // Focus order: apps, remember checkbox, displays, Quit, Start.
+    out property <int> idx-remember: apps.length;
+    out property <int> idx-first-display: apps.length + 1;
+    out property <int> idx-quit: apps.length + 1 + displays.length;
+    out property <int> idx-start: apps.length + 2 + displays.length;
+
+    property <bool> has-external: false;
+    background: Theme.bg;
+    accessible-role: groupbox;
+    accessible-label: "Get ready to play";
+
+    // Swallow clicks so nothing behind the screen reacts.
+    TouchArea {}
+
+    // Faint accent wash from the top-right corner. Full-window, two-stop: no hard edges or banding.
+    Rectangle {
+        background: @linear-gradient(225deg, Theme.accent.transparentize(0.93) 0%, Theme.bg.transparentize(1) 60%);
+    }
+
+    VerticalLayout {
+        padding-left: Theme.margin-x;
+        padding-right: Theme.margin-x;
+        padding-top: Theme.margin-y;
+        padding-bottom: Theme.margin-y;
+        spacing: Theme.space-xl;
+
+        // Header
+        HorizontalLayout {
+            spacing: Theme.space-sm;
+            height: 52px * Theme.k;
+            VerticalLayout {
+                alignment: center;
+                Logo { size: 44px * Theme.k; }
+            }
+            Text {
+                text: "KILN";
+                font-family: Theme.family-display;
+                font-size: Theme.font-body-lg;
+                font-weight: Theme.weight-semibold;
+                letter-spacing: 4px * Theme.kt;
+                color: Theme.text;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.dismissable: VerticalLayout {
+                alignment: center;
+                Button {
+                    text: "Back to library";
+                    keycap: "B";
+                    variant: "ghost";
+                    compact: true;
+                    clicked => { root.dismiss(); }
+                }
+            }
+        }
+
+        // Title
+        VerticalLayout {
+            spacing: Theme.space-xs;
+            Text {
+                text: "Get ready to play";
+                color: Theme.text;
+                font-family: Theme.family-display;
+                font-size: Theme.font-headline;
+                font-weight: Theme.weight-semibold;
+            }
+            if !Theme.compact-v: Text {
+                text: "Choose which apps to close and where Kiln should run. Nothing changes until you press Start.";
+                color: Theme.text-muted;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.space-xxl;
+            vertical-stretch: 1;
+
+            // ------------------------------------------------ background apps
+            VerticalLayout {
+                horizontal-stretch: 3;
+                spacing: Theme.space-md;
+
+                HorizontalLayout {
+                    SectionLabel { text: "BACKGROUND APPS"; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text {
+                        text: root.apps.length == 0 ? "" : root.closing-count + " of " + root.apps.length + " will close";
+                        color: Theme.text-muted;
+                        font-size: Theme.font-small;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    border-radius: Theme.radius-md;
+                    background: Theme.warning-subtle;
+                    border-width: Theme.hairline;
+                    border-color: Theme.warning.transparentize(0.6);
+                    HorizontalLayout {
+                        padding: Theme.space-md;
+                        spacing: Theme.space-md;
+                        Icon { glyph: Icons.save; size: Theme.icon-md; color: Theme.warning; width: 32px * Theme.kt; }
+                        VerticalLayout {
+                            spacing: Theme.space-xxs;
+                            Text { text: "Save your work first"; color: Theme.text; font-size: Theme.font-body; font-weight: Theme.weight-semibold; }
+                            if !Theme.compact-v: Text {
+                                text: "Apps set to Close are asked to quit normally. If one has unsaved work or asks to save, it stays open — Kiln never force-closes anything.";
+                                color: Theme.text-muted;
+                                font-size: Theme.font-small;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 40px * Theme.k + 48px * Theme.kt + Theme.space-xs * 2;
+                    border-radius: Theme.radius-lg;
+                    background: Theme.surface-1;
+                    border-width: Theme.hairline;
+                    border-color: Theme.border;
+                    clip: true;
+
+                    if root.apps.length > 0: app-list := Flickable {
+                        x: Theme.space-xs;
+                        y: Theme.space-xs;
+                        width: parent.width - Theme.space-xs * 2;
+                        height: parent.height - Theme.space-xs * 2;
+                        content-height: rows.preferred-height;
+
+                        // Keep the focused row visible.
+                        property <int> watched: root.focus-index;
+                        property <length> row-h: 40px * Theme.k + 48px * Theme.kt + Theme.space-xxs;
+                        changed watched => {
+                            if root.focus-index < root.apps.length {
+                                self.content-y = -max(0px, min(root.focus-index * self.row-h - (self.height - self.row-h) / 2,
+                                    self.content-height - self.height));
+                            }
+                        }
+
+                        rows := VerticalLayout {
+                            width: parent.width;
+                            spacing: Theme.space-xxs;
+                            alignment: start;
+                            for a[i] in root.apps: AppRow {
+                                name: a.name;
+                                category: a.category;
+                                processes: a.processes;
+                                close: a.close;
+                                focused: root.focus-index == i;
+                                set-close(v) => { root.set-app-close(i, v); }
+                                pointer-entered => { root.hover-focus(i); }
+                            }
+                        }
+                    }
+
+                    if root.apps.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: Theme.space-sm;
+                        Icon { glyph: Icons.check; size: Theme.icon-lg; color: Theme.success; }
+                        Text {
+                            text: "No background apps to close";
+                            color: Theme.text;
+                            font-size: Theme.font-body-lg;
+                            font-weight: Theme.weight-semibold;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "You're good to go.";
+                            color: Theme.text-muted;
+                            font-size: Theme.font-body;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                Checkbox {
+                    text: "Always keep the apps I set to Keep";
+                    checked: root.remember;
+                    focused: root.focus-index == root.idx-remember;
+                    toggled => { root.toggle-remember(); }
+                    pointer-entered => { root.hover-focus(root.idx-remember); }
+                }
+
+                if !Theme.compact-v: HorizontalLayout {
+                    spacing: Theme.space-xs;
+                    Icon { glyph: Icons.lock; size: Theme.icon-sm; color: Theme.text-faint; width: 28px * Theme.kt; }
+                    Text {
+                        text: "Never closed: Windows, drivers, security software, anti-cheat, game launchers, and the app you opened Kiln from.";
+                        color: Theme.text-muted;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+
+            // ------------------------------------------------ display choice
+            VerticalLayout {
+                horizontal-stretch: 2;
+                spacing: Theme.space-md;
+                alignment: start;
+
+                SectionLabel { text: "WHERE SHOULD KILN RUN?"; }
+
+                for d[i] in root.displays: DisplayCard {
+                    title: d.title;
+                    detail: d.detail;
+                    external: d.external;
+                    available: d.available;
+                    selected: root.display-choice == i;
+                    focused: root.focus-index == root.idx-first-display + i;
+                    choose => { root.choose-display(i); }
+                    pointer-entered => { root.hover-focus(root.idx-first-display + i); }
+                }
+
+                if root.inactive-external > 0: HorizontalLayout {
+                    spacing: Theme.space-xs;
+                    Icon { glyph: Icons.info; size: Theme.icon-sm; color: Theme.accent-fg; width: 28px * Theme.kt; }
+                    Text {
+                        text: "A TV or monitor is plugged in but turned off in Windows. Press Win + P, choose Extend, then refresh.";
+                        color: Theme.text-muted;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
+                        horizontal-stretch: 1;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    Button {
+                        text: "Refresh";
+                        icon: Icons.refresh;
+                        keycap: "Y";
+                        variant: "ghost";
+                        compact: true;
+                        clicked => { root.refresh(); }
+                    }
+                }
+            }
+        }
+
+        // Footer
+        HorizontalLayout {
+            spacing: Theme.space-md;
+            height: Theme.control-height;
+
+            if root.busy: HorizontalLayout {
+                horizontal-stretch: 1;
+                spacing: Theme.space-md;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: Theme.space-xs;
+                    horizontal-stretch: 1;
+                    Text { text: root.status; color: Theme.text; font-size: Theme.font-body; overflow: elide; }
+                    Rectangle {
+                        height: 6px * Theme.k;
+                        border-radius: self.height / 2;
+                        background: Theme.surface-3;
+                        Rectangle {
+                            x: 0px;
+                            width: parent.width * root.progress;
+                            height: parent.height;
+                            border-radius: parent.border-radius;
+                            background: Theme.accent;
+                            animate width { duration: Theme.motion-slow; easing: ease-out; }
+                        }
+                    }
+                }
+            }
+            if !root.busy: Rectangle { horizontal-stretch: 1; }
+
+            if !root.busy: Button {
+                text: "Quit Kiln";
+                variant: "ghost";
+                focused: root.focus-index == root.idx-quit;
+                clicked => { root.quit(); }
+            }
+            if !root.busy: Button {
+                text: root.closing-count > 0 ? "Close " + root.closing-count + (root.closing-count == 1 ? " app" : " apps") + " and start" : "Start";
+                icon: Icons.play;
+                variant: "primary";
+                focused: root.focus-index == root.idx-start;
+                clicked => { root.start-clicked(); }
+            }
+        }
+    }
+}

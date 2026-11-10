@@ -48,6 +48,7 @@ clap = { version = "4.5", features = ["derive"] }
 slint = "1.18"
 slint-build = "1.18"
 gilrs = { version = "0.11", default-features = false, features = ["xinput"] }
+cpal = "0.18"
 
 [profile.release]
 lto = "fat"

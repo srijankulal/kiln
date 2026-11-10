@@ -1,0 +1,73 @@
+// Kiln mark: a hollow outlined "K" with a glowing chevron at its heart.
+// Drawn as vector paths (100 x 100 design grid) so it stays sharp at any size and follows
+// the theme: outline in a neutral, chevron in the accent. assets/logo.svg is the same mark
+// as a file (window icon, docs).
+import { Theme } from "theme.slint";
+
+component Stroke inherits Path {
+    in property <length> unit;
+    in property <float> w;
+    viewbox-width: 100;
+    viewbox-height: 100;
+    fill: transparent;
+    stroke-width: self.unit * self.w;
+}
+
+export component Logo inherits Rectangle {
+    in property <length> size: 40px;
+    // 0 = chevron dark, 1 = fully lit. The glow halo scales with it.
+    in property <float> glow: 1;
+    in property <color> outline: Theme.text-faint;
+    // Fixed footprint: never stretch inside a layout (it would push the header tabs off-screen).
+    width: size;
+    height: size;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+
+    property <length> u: self.size / 100;
+    // Stem, and the arms as one outlined "<" band closed by a short vertical on the right.
+    property <string> stem: "M 12 8 L 32 8 L 32 92 L 12 92 Z";
+    property <string> arms: "M 66 8 L 92 8 L 78 27.6 L 78 72.4 L 92 92 L 66 92 L 36 50 Z";
+    property <string> chevron: "M 66 22 L 46 50 L 66 78";
+    property <color> hot: Theme.accent.mix(#ffffff, 0.55);
+
+    for d in [root.stem, root.arms]: Stroke {
+        width: root.size;
+        height: root.size;
+        unit: root.u;
+        w: 3;
+        commands: d;
+        stroke: root.outline;
+    }
+
+    // Glow: wide, faint strokes under a bright core. Layered solid strokes rather than a
+    // blur, so it renders the same on the software renderer.
+    for layer in [
+        { w: 16, a: 0.08 },
+        { w: 9, a: 0.16 },
+        { w: 5, a: 0.35 },
+    ]: Stroke {
+        width: root.size;
+        height: root.size;
+        unit: root.u;
+        w: layer.w;
+        commands: root.chevron;
+        stroke: Theme.accent.transparentize(1 - layer.a * root.glow);
+    }
+    Stroke {
+        width: root.size;
+        height: root.size;
+        unit: root.u;
+        w: 2.4;
+        commands: root.chevron;
+        stroke: root.glow > 0.05 ? Theme.accent.mix(root.outline, root.glow) : root.outline;
+    }
+    Stroke {
+        width: root.size;
+        height: root.size;
+        unit: root.u;
+        w: 0.9;
+        commands: root.chevron;
+        stroke: root.hot.transparentize(1 - root.glow);
+    }
+}

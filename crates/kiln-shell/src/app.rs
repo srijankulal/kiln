@@ -6,7 +6,7 @@ use anyhow::Result;
 use kiln_core::models::LaunchKind;
 use kiln_core::models::{DiscoveredGame, GameSource};
 use kiln_library::artwork::{
-    extract_steam_appid, find_local_folder_artwork, sanitize_filename, ArtworkManager,
+    find_local_folder_artwork, sanitize_filename, ArtworkManager, LookupCache,
 };
 use kiln_library::db::LibraryDatabase;
 use kiln_library::scanners::deduplicate_games;
@@ -14,8 +14,9 @@ use kiln_library::scanners::epic::EpicScanner;
 use kiln_library::scanners::standalone::StandaloneScanner;
 use kiln_library::scanners::steam::SteamScanner;
 use kiln_library::scanners::GameScanner;
-use kiln_sysctl::optimizer::{GameModeOptReport, GameModeOptimizer};
 use slint::{Image, SharedString};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +28,57 @@ pub struct ShellApp {
     safe_mode: bool,
     dry_run: bool,
     artwork_dir: PathBuf,
+    /// Decoded artwork keyed by file path, so switching tabs doesn't re-decode images.
+    image_cache: RefCell<HashMap<PathBuf, Image>>,
+    /// Folders the user added in Settings > Game folders.
+    game_folders: RefCell<Vec<PathBuf>>,
+}
+
+/// Folders always checked for games (if they exist), on top of the user's own.
+pub fn default_game_folders() -> Vec<PathBuf> {
+    [r"C:\Games", r"D:\Games", r"E:\Games"]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Finds and downloads art for every game that has none (see `ArtworkManager::resolve_missing`
+/// for the sources). Blocking: run it on a background thread. Returns how many games got art.
+pub fn sync_missing_artwork(db_path: &Path, artwork_dir: &Path, sgdb_key: Option<String>) -> usize {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return 0;
+    };
+    let Ok(db) = LibraryDatabase::open(db_path) else {
+        return 0;
+    };
+    let Ok(games) = db.list_games() else {
+        return 0;
+    };
+    let mgr = ArtworkManager::new(artwork_dir.to_path_buf(), sgdb_key);
+    let mut lookups = LookupCache::load(artwork_dir);
+    let mut fetched = 0;
+    for game in games {
+        let has_art = game
+            .artwork_grid
+            .as_ref()
+            .is_some_and(|p| Path::new(p).exists())
+            || mgr.get_cached_grid_path(&game.id).is_some()
+            || find_local_folder_artwork(Path::new(&game.install_dir)).is_some();
+        if has_art {
+            continue;
+        }
+        let (grid, hero) = rt.block_on(mgr.resolve_missing(&game, &mut lookups));
+        if let Some(g) = grid {
+            let h = hero.as_ref().and_then(|p| p.to_str());
+            let _ = db.update_artwork(&game.id, g.to_str(), h);
+            fetched += 1;
+        }
+    }
+    lookups.save();
+    fetched
 }
 
 impl ShellApp {
@@ -41,7 +93,14 @@ impl ShellApp {
             safe_mode,
             dry_run,
             artwork_dir,
+            image_cache: RefCell::new(HashMap::new()),
+            game_folders: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Sets the user's game folders (scanned on the next `rescan`).
+    pub fn set_game_folders(&self, folders: &[String]) {
+        *self.game_folders.borrow_mut() = folders.iter().map(PathBuf::from).collect();
     }
 
     pub fn is_safe_mode(&self) -> bool {
@@ -68,17 +127,25 @@ impl ShellApp {
             find_local_folder_artwork(Path::new(&game.install_dir)),
         ];
 
-        let mut poster_img = None;
-        for candidate in candidate_paths.into_iter().flatten() {
-            if candidate.exists() {
-                if let Some(img) = load_image_off_thread(&candidate, 480, 720) {
-                    poster_img = Some(img);
-                    break;
-                }
-            }
-        }
-
+        let poster_img = candidate_paths
+            .into_iter()
+            .flatten()
+            .find_map(|p| self.load_cached(&p, 480, 720));
         let (has_poster, poster) = match poster_img {
+            Some(img) => (true, img),
+            None => (false, Image::default()),
+        };
+
+        let hero_paths = [
+            game.artwork_hero.as_ref().map(PathBuf::from),
+            Some(self.artwork_dir.join(format!("hero_{}.jpg", safe_id))),
+            Some(self.artwork_dir.join(format!("hero_{}.png", safe_id))),
+        ];
+        let hero_img = hero_paths
+            .into_iter()
+            .flatten()
+            .find_map(|p| self.load_cached(&p, 1920, 1080));
+        let (has_hero, hero) = match hero_img {
             Some(img) => (true, img),
             None => (false, Image::default()),
         };
@@ -105,76 +172,24 @@ impl ShellApp {
             launcher: SharedString::from(launcher_name),
             has_poster,
             poster,
+            has_hero,
+            hero,
             last_played: SharedString::from(last_played_str),
             playtime_hours: SharedString::from(playtime_str),
             is_favorite: game.is_favorite,
         }
     }
 
-    /// Optimizes system state for console gaming: closes resource-heavy consumer applications
-    /// and flushes working set memory pages under the Safety Packet.
-    pub fn optimize_game_mode(&self) -> GameModeOptReport {
-        if self.safe_mode || self.dry_run {
-            tracing::info!("Dry run / Safe mode: Simulating Game Mode optimization");
-            GameModeOptReport {
-                apps_closed_count: 5,
-                apps_closed_names: vec![
-                    "chrome.exe".to_string(),
-                    "discord.exe".to_string(),
-                    "spotify.exe".to_string(),
-                    "slack.exe".to_string(),
-                    "code.exe".to_string(),
-                ],
-                ram_freed_mb: 1420,
-                total_ram_mb: 16384,
-                free_ram_mb: 11200,
-            }
-        } else {
-            let optimizer = GameModeOptimizer::new();
-            optimizer.run_optimization()
+    /// Loads an image from disk once and reuses the decoded pixels afterwards.
+    fn load_cached(&self, path: &Path, max_w: u32, max_h: u32) -> Option<Image> {
+        if let Some(img) = self.image_cache.borrow().get(path) {
+            return Some(img.clone());
         }
-    }
-
-    /// Fetches official cover art from Steam CDN for all games lacking local posters.
-    pub async fn sync_missing_artworks(&self) -> usize {
-        let all_games = match self.db.list_games() {
-            Ok(g) => g,
-            Err(_) => return 0,
-        };
-
-        let mut count = 0;
-        let artwork_mgr = ArtworkManager::new(self.artwork_dir.clone(), None);
-
-        for game in all_games {
-            let safe_id = sanitize_filename(&game.id);
-            let has_grid = self
-                .artwork_dir
-                .join(format!("grid_{}.jpg", safe_id))
-                .exists()
-                || self
-                    .artwork_dir
-                    .join(format!("grid_{}.png", safe_id))
-                    .exists()
-                || self.artwork_dir.join(format!("{}.jpg", safe_id)).exists()
-                || game
-                    .artwork_grid
-                    .as_ref()
-                    .map(|p| Path::new(p).exists())
-                    .unwrap_or(false);
-
-            if !has_grid {
-                if let Some(appid) = extract_steam_appid(&game.launch_target, &game.id, &game.title)
-                {
-                    let (grid, hero) = artwork_mgr.fetch_steam_cdn_artwork(&game.id, &appid).await;
-                    if let Some(g) = grid {
-                        let h_str = hero.as_ref().and_then(|p| p.to_str());
-                        let _ = self.db.update_artwork(&game.id, g.to_str(), h_str);
-                        count += 1;
-                    }
-                }
-            }
-        }
-        count
+        let img = load_image_off_thread(path, max_w, max_h)?;
+        self.image_cache
+            .borrow_mut()
+            .insert(path.to_path_buf(), img.clone());
+        Some(img)
     }
 
     /// Pre-seeds procedural / fallback artwork for demo entries so cards are never blank offline.
@@ -287,9 +302,13 @@ impl ShellApp {
             match game.launch_kind {
                 LaunchKind::DirectExe => {
                     if let Some(ref exe) = game.exe_path {
-                        std::process::Command::new(exe)
-                            .current_dir(&game.install_dir)
-                            .spawn()?;
+                        // Run from the executable's own folder: many games load files
+                        // relative to it (it can be nested below the game folder).
+                        let dir = Path::new(exe)
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| PathBuf::from(&game.install_dir));
+                        std::process::Command::new(exe).current_dir(dir).spawn()?;
                     } else {
                         std::process::Command::new(&game.launch_target)
                             .current_dir(&game.install_dir)
@@ -319,7 +338,8 @@ impl ShellApp {
         Ok(())
     }
 
-    /// Performs library scan across known directories and test fixtures.
+    /// Scans Steam, Epic and the game folders, then updates the library. Games from game
+    /// folders that are gone (folder removed in Settings, or deleted) are dropped.
     pub fn rescan(&self) -> Result<usize> {
         let mut discovered = Vec::new();
 
@@ -328,7 +348,6 @@ impl ShellApp {
             PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps"),
             PathBuf::from(r"D:\SteamLibrary\steamapps"),
             PathBuf::from(r"E:\SteamLibrary\steamapps"),
-            PathBuf::from("crates/kiln-library/fixtures/steam/steamapps"),
         ];
         if let Ok(mut games) = SteamScanner::new(steam_roots).scan() {
             discovered.append(&mut games);
@@ -338,20 +357,18 @@ impl ShellApp {
         let epic_roots = vec![
             PathBuf::from(r"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests"),
             PathBuf::from(r"C:\ProgramData\Epic\UnrealEngineLauncher\Data\Manifests"),
-            PathBuf::from("crates/kiln-library/fixtures/epic/Manifests"),
         ];
         if let Ok(mut games) = EpicScanner::new(epic_roots).scan() {
             discovered.append(&mut games);
         }
 
-        // 3. Standalone
-        let standalone_roots = vec![
-            PathBuf::from(r"C:\Games"),
-            PathBuf::from(r"D:\Games"),
-            PathBuf::from(r"E:\Games"),
-            PathBuf::from(r"C:\Program Files\Games"),
-            PathBuf::from("crates/kiln-library/fixtures/standalone"),
-        ];
+        // 3. Game folders: the defaults plus the user's own (Settings > Game folders).
+        let mut standalone_roots = default_game_folders();
+        for f in self.game_folders.borrow().iter() {
+            if !standalone_roots.contains(f) {
+                standalone_roots.push(f.clone());
+            }
+        }
         if let Ok(mut games) = StandaloneScanner::new(standalone_roots).scan() {
             discovered.append(&mut games);
         }
@@ -360,6 +377,18 @@ impl ShellApp {
         let count = deduped.len();
         for g in &deduped {
             let _ = self.db.upsert_game(g);
+        }
+
+        // Drop folder games that weren't found this time (manually added games stay).
+        if let Ok(existing) = self.db.list_games() {
+            for g in existing {
+                let stale = g.source == GameSource::Standalone
+                    && !g.is_manual
+                    && !deduped.iter().any(|d| d.id == g.id);
+                if stale {
+                    let _ = self.db.delete_game(&g.id);
+                }
+            }
         }
 
         Ok(count)
@@ -522,15 +551,6 @@ mod tests {
         assert_eq!(format_playtime(3600), "1h 0m");
         assert_eq!(format_playtime(5400), "1h 30m");
         assert_eq!(format_timestamp(0), "");
-    }
-
-    #[test]
-    fn test_shell_app_game_mode_optimization() {
-        let db = Rc::new(LibraryDatabase::open_in_memory().unwrap());
-        let app = ShellApp::new(db, true, true, PathBuf::from("/tmp/art"));
-        let report = app.optimize_game_mode();
-        assert!(report.ram_freed_mb > 0);
-        assert!(report.apps_closed_count > 0);
     }
 
     #[test]
