@@ -1,156 +1,38 @@
+// Release builds are a GUI app: no console window behind Kiln. Debug builds keep the
+// console for logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! Kiln shell: Fullscreen 10-foot TV UI binary.
 
-pub mod app;
-pub mod image_loader;
-
-use app::{MainWindow, ShellApp};
 use clap::Parser;
 use kiln_input::{GilrsPoller, InputPoller, NavAction};
 use kiln_library::db::LibraryDatabase;
+use kiln_shell::app::{LaunchApp, MainWindow, Prompts, Sfx, ShellApp};
+use kiln_shell::launch::{self, DisplayTarget};
+use kiln_shell::settings::UiSettings;
+use kiln_shell::sound::{Cue, SoundEngine};
+use kiln_shell::{handle_nav_action, sfx, sync_selected_game};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
-pub fn sync_selected_game(ui: &MainWindow) {
-    let idx = ui.get_focused_card_index() as usize;
-    if let Some(game) = ui.get_games().row_data(idx) {
-        ui.set_selected_game(game);
-    } else if ui.get_games().row_count() > 0 {
-        if let Some(first) = ui.get_games().row_data(0) {
-            ui.set_selected_game(first);
-        }
-    }
-}
-
-pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
-    match action {
-        NavAction::EmergencyAbort => {
-            eprintln!("EMERGENCY ABORT TRIGGERED VIA GAMEPAD CHORD (BACK+START)");
-            std::process::exit(0);
-        }
-        NavAction::NextTab => {
-            let next = (ui.get_selected_tab() + 1) % 7;
-            ui.set_selected_tab(next);
-            ui.set_focused_card_index(0);
-            ui.invoke_change_tab(next);
-            sync_selected_game(ui);
-        }
-        NavAction::PrevTab => {
-            let prev = (ui.get_selected_tab() + 6) % 7;
-            ui.set_selected_tab(prev);
-            ui.set_focused_card_index(0);
-            ui.invoke_change_tab(prev);
-            sync_selected_game(ui);
-        }
-        NavAction::Left => {
-            if !ui.get_show_game_detail()
-                && !ui.get_show_power_menu()
-                && !ui.get_show_game_mode_prompt()
-            {
-                let idx = ui.get_focused_card_index();
-                if idx > 0 {
-                    ui.set_focused_card_index(idx - 1);
-                    sync_selected_game(ui);
-                }
-            }
-        }
-        NavAction::Right => {
-            if !ui.get_show_game_detail()
-                && !ui.get_show_power_menu()
-                && !ui.get_show_game_mode_prompt()
-            {
-                let idx = ui.get_focused_card_index();
-                let games_len = ui.get_games().row_count() as i32;
-                if idx + 1 < games_len {
-                    ui.set_focused_card_index(idx + 1);
-                    sync_selected_game(ui);
-                }
-            }
-        }
-        NavAction::Up => {
-            if !ui.get_show_game_detail()
-                && !ui.get_show_power_menu()
-                && !ui.get_show_game_mode_prompt()
-                && ui.get_focused_card_index() > 0
-            {
-                ui.set_focused_card_index(0);
-                sync_selected_game(ui);
-            }
-        }
-        NavAction::Down => {
-            let games_len = ui.get_games().row_count() as i32;
-            if !ui.get_show_game_detail()
-                && !ui.get_show_power_menu()
-                && !ui.get_show_game_mode_prompt()
-                && games_len > 0
-                && ui.get_focused_card_index() < games_len - 1
-            {
-                ui.set_focused_card_index(games_len - 1);
-                sync_selected_game(ui);
-            }
-        }
-        NavAction::Select => {
-            if ui.get_show_game_mode_prompt() {
-                if ui.get_opt_completed() {
-                    ui.set_show_game_mode_prompt(false);
-                } else if !ui.get_is_optimizing() {
-                    ui.invoke_trigger_game_mode_optimization();
-                }
-            } else if ui.get_show_game_detail() {
-                let sel = ui.get_selected_game();
-                ui.set_show_game_detail(false);
-                ui.invoke_play_game(sel.id);
-            } else if ui.get_show_power_menu() {
-                ui.set_show_power_menu(false);
-                let _ = ui.hide();
-            } else if ui.get_selected_tab() == 6 {
-                let cur = ui.get_trim_tier();
-                ui.invoke_set_trim_tier((cur + 1) % 3);
-            } else {
-                let idx = ui.get_focused_card_index() as usize;
-                if let Some(game) = ui.get_games().row_data(idx) {
-                    ui.set_selected_game(game);
-                    ui.set_show_game_detail(true);
-                }
-            }
-        }
-        NavAction::Back => {
-            if ui.get_show_game_mode_prompt() {
-                if !ui.get_is_optimizing() {
-                    ui.set_show_game_mode_prompt(false);
-                }
-            } else if ui.get_show_game_detail() {
-                ui.set_show_game_detail(false);
-            } else if ui.get_show_power_menu() {
-                ui.set_show_power_menu(false);
-            } else {
-                ui.set_show_power_menu(true);
-            }
-        }
-        NavAction::ContextMenu => {
-            let idx = ui.get_focused_card_index() as usize;
-            if let Some(game) = ui.get_games().row_data(idx) {
-                ui.invoke_toggle_favorite(game.id);
-            }
-        }
-        NavAction::Options => {
-            ui.invoke_rescan_library();
-        }
-        NavAction::ToggleMouseMode => {
-            let current = ui.get_status_message();
-            if current.starts_with("Mouse Mode") {
-                ui.set_status_message(SharedString::from(""));
-            } else {
-                ui.set_status_message(SharedString::from(
-                    "Mouse Mode: ON (Stick moves cursor, A clicks)",
-                ));
-            }
-        }
-    }
-}
+/// The loading screen's bar fills no earlier than this, in time with the startup chime's
+/// final chord (see `render_boot` in sound.rs).
+const BOOT_MIN: Duration = Duration::from_millis(1900);
+/// How long the filled bar and summary stay up before the loading screen fades out.
+const BOOT_HOLD: Duration = Duration::from_millis(900);
+/// Loading screen fade-out (matches `fade` in ui/boot.slint).
+const BOOT_FADE: Duration = Duration::from_millis(450);
+/// Lets a closing sound finish before the window goes away.
+const EXIT_SOUND_DELAY: Duration = Duration::from_millis(260);
+/// After switching to the chosen screen / full screen, wait for the window to settle before
+/// the loading animation and chime start, so the resize never cuts into the animation.
+const BOOT_SETTLE: Duration = Duration::from_millis(380);
 
 #[derive(Parser, Debug)]
 #[command(
@@ -232,70 +114,57 @@ fn main() -> anyhow::Result<()> {
         artwork_dir.clone(),
     ));
 
-    // Ensure initial games exist in library
-    let existing_games = db.list_games()?;
-    if existing_games.is_empty() {
-        println!("Initial database is empty, performing initial library scan...");
-        let scanned = app.rescan().unwrap_or(0);
-        println!("Initial scan completed: {} games added", scanned);
+    let ui = MainWindow::new()?;
 
-        // If no games found on this system, add demo entries for 10-foot experience
-        if scanned == 0 {
-            use kiln_core::models::{DiscoveredGame, GameSource, LaunchKind};
-            let demo_titles = [
-                ("Portal 2", GameSource::Steam, "steam://rungameid/620"),
-                ("Hades II", GameSource::Steam, "steam://rungameid/1145350"),
-                (
-                    "Alan Wake 2",
-                    GameSource::Epic,
-                    "com.epicgames.launcher://apps/AlanWake2?action=launch",
-                ),
-                (
-                    "Cyberpunk 2077",
-                    GameSource::Gog,
-                    "C:\\Games\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe",
-                ),
-                (
-                    "Forza Horizon 5",
-                    GameSource::XboxMsStore,
-                    "shell:AppsFolder\\Microsoft.624F8B84B80_8wekyb3d8bbwe!ForzaHorizon5",
-                ),
-                (
-                    "Dead Cells",
-                    GameSource::Standalone,
-                    "C:\\Games\\Dead Cells\\deadcells.exe",
-                ),
-            ];
-            for (title, source, target) in demo_titles {
-                let _ = db.upsert_game(&DiscoveredGame {
-                    id: format!("demo_{}", title.to_lowercase().replace(' ', "_")),
-                    title: title.to_string(),
-                    source,
-                    install_dir: "C:\\Games".to_string(),
-                    exe_path: None,
-                    launch_kind: if target.starts_with("C:") {
-                        LaunchKind::DirectExe
-                    } else {
-                        LaunchKind::Uri
-                    },
-                    launch_target: target.to_string(),
-                    launcher: None,
-                    artwork_grid: None,
-                    artwork_hero: None,
-                    last_played: Some(1700000000),
-                    playtime_seconds: 3600 * 5,
-                    is_hidden: false,
-                    is_favorite: title == "Portal 2" || title == "Alan Wake 2",
-                    is_manual: false,
-                });
+    // Restore interface preferences (size, text, font, theme, ...) before the first frame.
+    let settings_path = Rc::new(app_dir.join("settings.json"));
+    let settings = Rc::new(RefCell::new(UiSettings::load(&settings_path)));
+    settings.borrow().apply(&ui);
+    let save_settings = {
+        let settings = settings.clone();
+        let path = settings_path.clone();
+        move || {
+            if let Err(e) = settings.borrow().save(&path) {
+                eprintln!("Failed to save settings: {}", e);
             }
         }
+    };
+    let save_settings = Rc::new(save_settings);
+    {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let save = save_settings.clone();
+        ui.on_settings_changed(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                settings.borrow_mut().capture_ui(&ui);
+                save();
+            }
+        });
     }
 
-    // Ensure fallback posters exist for demo games
-    app.ensure_demo_artworks();
+    // Interface sounds: the UI names a cue, the engine synthesizes and plays it.
+    let sound = Rc::new(SoundEngine::start());
+    {
+        let ui_weak = ui.as_weak();
+        let sound = sound.clone();
+        ui.global::<Sfx>().on_play(move |name, variant| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let g = ui.global::<Sfx>();
+            if !g.get_ready() || !g.get_enabled() {
+                return;
+            }
+            if let Some(cue) = Cue::from_name(&name, variant) {
+                sound.play(cue, g.get_volume());
+            }
+        });
+    }
 
-    let ui = MainWindow::new()?;
+    // Library: rescan on every launch so new installs and game-folder changes show up.
+    app.set_game_folders(&settings.borrow().game_folders);
+    match app.rescan() {
+        Ok(n) => println!("Library scan: {} games", n),
+        Err(e) => eprintln!("Library scan failed: {e}"),
+    }
 
     // Populate Initial View (Tab 0: All)
     let (initial_games, initial_recent) = app.load_games(0)?;
@@ -303,53 +172,33 @@ fn main() -> anyhow::Result<()> {
     ui.set_recent_games(ModelRc::new(VecModel::from(initial_recent)));
     sync_selected_game(&ui);
     ui.set_clock_time(SharedString::from(get_current_time_str()));
-    ui.set_display_info(SharedString::from("TV: 3840x2160 @ 120Hz [HDR]"));
 
-    // Off-thread Steam CDN artwork resolver
-    let bg_db_path = db_path.clone();
-    let bg_artwork_dir = artwork_dir.clone();
-    let ui_weak_art = ui.as_weak();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build();
-        if let Ok(rt) = rt {
-            if let Ok(db) = LibraryDatabase::open(&bg_db_path) {
-                if let Ok(games) = db.list_games() {
-                    let mgr = kiln_library::artwork::ArtworkManager::new(bg_artwork_dir, None);
-                    let mut fetched = 0;
-                    for game in games {
-                        if game.artwork_grid.is_some() {
-                            continue;
+    // Artwork for games without any, on a background thread (see app::sync_missing_artwork).
+    let art_sync: Rc<dyn Fn()> = {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let db_path = db_path.clone();
+        let artwork_dir = artwork_dir.clone();
+        Rc::new(move || {
+            let ui_weak = ui_weak.clone();
+            let key = settings.borrow().sgdb_key();
+            let db_path = db_path.clone();
+            let artwork_dir = artwork_dir.clone();
+            std::thread::spawn(move || {
+                let fetched = kiln_shell::app::sync_missing_artwork(&db_path, &artwork_dir, key);
+                if fetched > 0 {
+                    println!("Artwork: found art for {fetched} game(s)");
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            // Reload the current view from the database (no rescan).
+                            ui.invoke_change_tab(ui.get_selected_tab());
                         }
-                        if mgr.get_cached_grid_path(&game.id).is_some() {
-                            continue;
-                        }
-                        if let Some(appid) = kiln_library::artwork::extract_steam_appid(
-                            &game.launch_target,
-                            &game.id,
-                            &game.title,
-                        ) {
-                            let (grid, hero) =
-                                rt.block_on(mgr.fetch_steam_cdn_artwork(&game.id, &appid));
-                            if let Some(g) = grid {
-                                let h_str = hero.as_ref().and_then(|p| p.to_str());
-                                let _ = db.update_artwork(&game.id, g.to_str(), h_str);
-                                fetched += 1;
-                            }
-                        }
-                    }
-                    if fetched > 0 {
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak_art.upgrade() {
-                                ui.invoke_rescan_library();
-                            }
-                        });
-                    }
+                    });
                 }
-            }
-        }
-    });
+            });
+        })
+    };
+    art_sync();
 
     // Clock timer (updates time every 10 seconds)
     let clock_timer = slint::Timer::default();
@@ -366,17 +215,35 @@ fn main() -> anyhow::Result<()> {
 
     // Callbacks
     let app_play = app.clone();
+    let ui_weak_play = ui.as_weak();
     ui.on_play_game(move |id| {
-        if let Err(e) = app_play.play_game(id.as_str()) {
-            eprintln!("Failed to play game: {}", e);
+        let ui = ui_weak_play.upgrade();
+        match app_play.play_game(id.as_str()) {
+            Ok(()) => {
+                if let Some(ui) = &ui {
+                    sfx(ui, "launch", 0);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to play game: {}", e);
+                if let Some(ui) = &ui {
+                    sfx(ui, "error", 0);
+                    ui.set_status_message(SharedString::from("Couldn't start that game"));
+                }
+            }
         }
     });
 
     let app_fav = app.clone();
     let ui_weak_fav = ui.as_weak();
     ui.on_toggle_favorite(move |id| {
-        let _ = app_fav.toggle_favorite(id.as_str());
+        let now_favorite = app_fav.toggle_favorite(id.as_str());
         if let Some(ui) = ui_weak_fav.upgrade() {
+            match now_favorite {
+                Ok(true) => sfx(&ui, "favorite", 0),
+                Ok(false) => sfx(&ui, "unfavorite", 0),
+                Err(_) => sfx(&ui, "error", 0),
+            }
             let cur_tab = ui.get_selected_tab();
             if let Ok((games, recent)) = app_fav.load_games(cur_tab) {
                 ui.set_games(ModelRc::new(VecModel::from(games)));
@@ -399,22 +266,16 @@ fn main() -> anyhow::Result<()> {
 
     let app_rescan = app.clone();
     let ui_weak_rescan = ui.as_weak();
+    let art_sync_rescan = art_sync.clone();
     ui.on_rescan_library(move || {
         let _ = app_rescan.rescan();
+        art_sync_rescan();
         if let Some(ui) = ui_weak_rescan.upgrade() {
             let cur_tab = ui.get_selected_tab();
             if let Ok((games, recent)) = app_rescan.load_games(cur_tab) {
                 ui.set_games(ModelRc::new(VecModel::from(games)));
                 ui.set_recent_games(ModelRc::new(VecModel::from(recent)));
             }
-        }
-    });
-
-    let ui_weak_tier = ui.as_weak();
-    ui.on_set_trim_tier(move |tier| {
-        if let Some(ui) = ui_weak_tier.upgrade() {
-            ui.set_trim_tier(tier);
-            println!("Settings: Background trim tier updated to {}", tier);
         }
     });
 
@@ -428,106 +289,343 @@ fn main() -> anyhow::Result<()> {
     });
 
     let ui_weak_power = ui.as_weak();
+    let power_dry_run = app.is_dry_run();
     ui.on_power_action(move |action| {
         println!("Power action triggered: {}", action);
+        let Some(ui) = ui_weak_power.upgrade() else {
+            return;
+        };
+        sfx(&ui, "confirm", 0);
+        let weak = ui.as_weak();
         if action == "exit" {
-            if let Some(ui) = ui_weak_power.upgrade() {
-                let _ = ui.hide();
-            }
-        }
-    });
-
-    // Game Mode Optimization callbacks
-    let is_safe = app.is_safe_mode();
-    let is_dry = app.is_dry_run();
-    let ui_weak_opt = ui.as_weak();
-    ui.on_trigger_game_mode_optimization(move || {
-        if let Some(ui) = ui_weak_opt.upgrade() {
-            ui.set_is_optimizing(true);
-            ui.set_opt_progress(0.2);
-            ui.set_opt_status_text(SharedString::from(
-                "Phase 1/4: Scanning running user tasks...",
-            ));
-        }
-
-        let ui_weak_worker = ui_weak_opt.clone();
-
-        std::thread::spawn(move || {
-            // Progressive visual status steps
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let _ = slint::invoke_from_event_loop({
-                let ui_weak = ui_weak_worker.clone();
-                move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_opt_progress(0.45);
-                        ui.set_opt_status_text(SharedString::from(
-                            "Phase 2/4: Verifying safety packet across Windows services...",
-                        ));
-                    }
+            slint::Timer::single_shot(EXIT_SOUND_DELAY, move || {
+                if let Some(ui) = weak.upgrade() {
+                    let _ = ui.hide();
                 }
             });
-
-            std::thread::sleep(std::time::Duration::from_millis(350));
-            let _ = slint::invoke_from_event_loop({
-                let ui_weak = ui_weak_worker.clone();
-                move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_opt_progress(0.7);
-                        ui.set_opt_status_text(SharedString::from(
-                            "Phase 3/4: Gracefully closing background consumer apps...",
-                        ));
-                    }
-                }
-            });
-
-            // Execute real optimization under the safety packet
-            let report = if is_safe || is_dry {
-                kiln_sysctl::optimizer::GameModeOptReport {
-                    apps_closed_count: 5,
-                    apps_closed_names: vec![
-                        "chrome.exe".to_string(),
-                        "discord.exe".to_string(),
-                        "spotify.exe".to_string(),
-                        "slack.exe".to_string(),
-                        "code.exe".to_string(),
-                    ],
-                    ram_freed_mb: 1420,
-                    total_ram_mb: 16384,
-                    free_ram_mb: 11200,
-                }
-            } else {
-                let optimizer = kiln_sysctl::optimizer::GameModeOptimizer::new();
-                optimizer.run_optimization()
-            };
-
-            std::thread::sleep(std::time::Duration::from_millis(350));
-            let _ = slint::invoke_from_event_loop({
-                let ui_weak = ui_weak_worker.clone();
-                move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_opt_progress(1.0);
-                        ui.set_is_optimizing(false);
-                        ui.set_opt_completed(true);
-                        let report_msg = format!(
-                            "{} MB RAM Reclaimed • {} Apps Closed",
-                            report.ram_freed_mb, report.apps_closed_count
-                        );
-                        ui.set_opt_report_text(SharedString::from(report_msg));
-                        ui.set_status_message(SharedString::from(
-                            "⚡ Game Mode Active: Maximum performance dedicated to gaming",
-                        ));
-                    }
+            return;
+        }
+        let Some(power) = kiln_sysctl::session::PowerAction::from_name(&action) else {
+            return;
+        };
+        // Off the UI thread: sleep only returns once the PC wakes up again.
+        slint::Timer::single_shot(EXIT_SOUND_DELAY, move || {
+            std::thread::spawn(move || {
+                if let Err(e) = kiln_sysctl::session::perform(power, power_dry_run) {
+                    eprintln!("Power action failed: {e}");
+                    let msg = format!("Couldn't {}: {e}", action.replace("shutdown", "shut down"));
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            sfx(&ui, "error", 0);
+                            ui.set_status_message(SharedString::from(msg));
+                        }
+                    });
                 }
             });
         });
     });
 
-    let ui_weak_dismiss = ui.as_weak();
-    ui.on_dismiss_game_mode_prompt(move || {
-        if let Some(ui) = ui_weak_dismiss.upgrade() {
-            ui.set_show_game_mode_prompt(false);
+    // ------------------------------------------------------------------ game folders
+    let set_folders = {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let save = save_settings.clone();
+        let app = app.clone();
+        let art_sync = art_sync.clone();
+        Rc::new(move |folders: Vec<String>, status: String| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            settings.borrow_mut().game_folders = folders.clone();
+            save();
+            settings.borrow().apply_game_folders(&ui);
+            app.set_game_folders(&folders);
+            let _ = app.rescan();
+            ui.invoke_change_tab(ui.get_selected_tab());
+            art_sync();
+            ui.set_status_message(SharedString::from(status));
+        })
+    };
+    {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let set_folders = set_folders.clone();
+        ui.on_add_game_folder(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(dir) = kiln_sysctl::dialogs::pick_folder("Choose a folder with games") else {
+                return; // cancelled
+            };
+            let dir = dir.to_string_lossy().to_string();
+            let mut folders = settings.borrow().game_folders.clone();
+            if folders.iter().any(|f| f.eq_ignore_ascii_case(&dir)) {
+                sfx(&ui, "bump", 0);
+                ui.set_status_message(SharedString::from("That folder is already in the list"));
+                return;
+            }
+            folders.push(dir.clone());
+            let found = kiln_library::scanners::standalone::StandaloneScanner::new(vec![
+                std::path::PathBuf::from(&dir),
+            ]);
+            let count = kiln_library::scanners::GameScanner::scan(&found)
+                .map(|g| g.len())
+                .unwrap_or(0);
+            sfx(&ui, "confirm", 0);
+            ui.set_folders_focus(folders.len() as i32); // stay on "Add a folder"
+            set_folders(
+                folders,
+                match count {
+                    0 => "Added the folder, but found no games in it yet".to_string(),
+                    1 => "Added the folder: found 1 game".to_string(),
+                    n => format!("Added the folder: found {n} games"),
+                },
+            );
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let set_folders = set_folders.clone();
+        ui.on_remove_game_folder(move |i| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let mut folders = settings.borrow().game_folders.clone();
+            if (i as usize) >= folders.len() {
+                return;
+            }
+            let removed = folders.remove(i as usize);
+            sfx(&ui, "toggle-off", 0);
+            ui.set_folders_focus((i).min(folders.len() as i32));
+            set_folders(folders, format!("Removed {removed} (nothing was deleted)"));
+        });
+    }
+
+    // ------------------------------------------------------------------ startup screen
+    // Shown first on every launch: pick apps to close and the screen to run on.
+    let display_targets: Rc<RefCell<Vec<DisplayTarget>>> = Rc::new(RefCell::new(Vec::new()));
+    let launch_rows: Rc<VecModel<LaunchApp>> = Rc::new(VecModel::default());
+    ui.set_launch_apps(ModelRc::from(launch_rows.clone()));
+
+    let refresh_launch = {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let display_targets = display_targets.clone();
+        let launch_rows = launch_rows.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            // Keep the user's Close/Keep choices across a refresh.
+            let previous: HashMap<String, bool> = launch_rows
+                .iter()
+                .map(|r| (r.exe.to_string(), r.close))
+                .collect();
+            let apps = kiln_sysctl::optimizer::GameModeOptimizer::new().scan_running_apps();
+            let rows = launch::app_rows(&apps, &settings.borrow().always_keep, &previous);
+            launch_rows.set_vec(rows);
+
+            let scan = kiln_sysctl::monitors::scan_displays();
+            let targets = launch::display_targets(&scan);
+            let choice =
+                launch::default_display_choice(&targets, &settings.borrow().preferred_display);
+            ui.set_launch_displays(ModelRc::new(VecModel::from(
+                targets.iter().map(|t| t.to_row()).collect::<Vec<_>>(),
+            )));
+            ui.set_launch_display_choice(choice as i32);
+            ui.set_launch_inactive_external(scan.inactive_external as i32);
+            ui.set_launch_closing_count(launch_rows.iter().filter(|r| r.close).count() as i32);
+            ui.set_launch_focus(launch::start_index(launch_rows.row_count(), targets.len()));
+            *display_targets.borrow_mut() = targets;
         }
-    });
+    };
+    let refresh_launch = Rc::new(refresh_launch);
+
+    {
+        let refresh = refresh_launch.clone();
+        ui.on_launch_refresh(move || refresh());
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let refresh = refresh_launch.clone();
+        ui.on_open_launch(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                refresh();
+                ui.set_launch_dismissable(true);
+                ui.set_show_launch(true);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let launch_rows = launch_rows.clone();
+        ui.on_launch_set_app_close(move |i, close| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if let Some(mut row) = launch_rows.row_data(i as usize) {
+                if row.close == close {
+                    sfx(&ui, "bump", 0);
+                    return;
+                }
+                // Keep sounds like "on", Close like "off".
+                sfx(&ui, if close { "toggle-off" } else { "toggle-on" }, 0);
+                row.close = close;
+                launch_rows.set_row_data(i as usize, row);
+            }
+            ui.set_launch_closing_count(launch_rows.iter().filter(|r| r.close).count() as i32);
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let display_targets = display_targets.clone();
+        ui.on_launch_choose_display(move |i| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let available = display_targets
+                .borrow()
+                .get(i as usize)
+                .is_some_and(|t| t.monitor.is_some());
+            if available {
+                sfx(&ui, "select", 0);
+                ui.set_launch_display_choice(i);
+            } else {
+                sfx(&ui, "bump", 0);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.on_launch_toggle_remember(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                let on = !ui.get_launch_remember();
+                sfx(&ui, if on { "toggle-on" } else { "toggle-off" }, 0);
+                ui.set_launch_remember(on);
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        ui.on_launch_quit(move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                sfx(&ui, "back", 0);
+            }
+            slint::Timer::single_shot(EXIT_SOUND_DELAY, || {
+                let _ = slint::quit_event_loop();
+            });
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let save = save_settings.clone();
+        ui.on_clear_kept_apps(move || {
+            settings.borrow_mut().always_keep.clear();
+            save();
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_kept_apps_count(0);
+                ui.set_status_message(SharedString::from("Always-kept apps cleared"));
+            }
+        });
+    }
+    {
+        let ui_weak = ui.as_weak();
+        let settings = settings.clone();
+        let save = save_settings.clone();
+        let display_targets = display_targets.clone();
+        let launch_rows = launch_rows.clone();
+        let is_safe = app.is_safe_mode();
+        let is_dry = app.is_dry_run();
+        ui.on_launch_start(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let rows: Vec<LaunchApp> = launch_rows.iter().collect();
+            let to_close: Vec<String> = rows
+                .iter()
+                .filter(|r| r.close)
+                .map(|r| r.exe.to_string())
+                .collect();
+            let target = display_targets
+                .borrow()
+                .get(ui.get_launch_display_choice() as usize)
+                .cloned();
+
+            // Remember choices: always-keep list and preferred screen.
+            {
+                let mut s = settings.borrow_mut();
+                s.always_keep =
+                    launch::update_always_keep(&s.always_keep, &rows, ui.get_launch_remember());
+                if let Some(t) = &target {
+                    s.preferred_display = if t.external { "external" } else { "internal" }.into();
+                }
+                ui.set_kept_apps_count(s.always_keep.len() as i32);
+            }
+            save();
+
+            // Loading screen + startup chime, on the chosen screen, while apps close.
+            let names: Vec<String> = rows
+                .iter()
+                .filter(|r| r.close)
+                .map(|r| r.name.to_string())
+                .collect();
+            let names_by_exe: HashMap<String, String> = rows
+                .iter()
+                .map(|r| (r.exe.to_string(), r.name.to_string()))
+                .collect();
+            ui.set_boot_status(SharedString::from(launch::closing_status(&names)));
+            ui.set_boot_done(false);
+            ui.set_boot_leaving(false);
+            ui.set_boot_playing(false);
+            ui.set_show_boot(true);
+            ui.set_show_launch(false);
+            // Move to the chosen screen behind a plain backdrop first...
+            if let Some(m) = target.and_then(|t| t.monitor) {
+                place_window(&ui, &m, is_safe);
+            }
+
+            // ...then, once the window has settled, start the animation, chime and closing.
+            let ui_weak = ui.as_weak();
+            slint::Timer::single_shot(BOOT_SETTLE, move || {
+                let Some(ui) = ui_weak.upgrade() else { return };
+                ui.set_boot_playing(true);
+                sfx(&ui, "boot", 0);
+                let started = Instant::now();
+                let ui_weak = ui.as_weak();
+                std::thread::spawn(move || {
+                    let report = if to_close.is_empty() {
+                        kiln_sysctl::optimizer::CloseReport::default()
+                    } else if is_dry {
+                        println!(
+                            "[DRY-RUN] Would ask these apps to close: {}",
+                            to_close.join(", ")
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(700));
+                        kiln_sysctl::optimizer::CloseReport {
+                            closed: to_close
+                                .iter()
+                                .map(|e| names_by_exe.get(e).cloned().unwrap_or_else(|| e.clone()))
+                                .collect(),
+                            ..Default::default()
+                        }
+                    } else {
+                        kiln_sysctl::optimizer::GameModeOptimizer::new()
+                            .close_apps(&to_close, std::time::Duration::from_secs(10))
+                    };
+                    let summary = launch::summarize(&report, is_dry);
+                    println!("Startup: {}", summary);
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let wait = BOOT_MIN.saturating_sub(started.elapsed());
+                        slint::Timer::single_shot(wait, move || {
+                            let Some(ui) = ui_weak.upgrade() else { return };
+                            ui.set_boot_status(SharedString::from(summary.clone()));
+                            ui.set_boot_done(true);
+                            let weak = ui.as_weak();
+                            slint::Timer::single_shot(BOOT_HOLD, move || {
+                                let Some(ui) = weak.upgrade() else { return };
+                                ui.set_boot_leaving(true);
+                                let weak = ui.as_weak();
+                                slint::Timer::single_shot(BOOT_FADE, move || {
+                                    let Some(ui) = weak.upgrade() else { return };
+                                    ui.set_show_boot(false);
+                                    ui.set_status_message(SharedString::from(summary));
+                                });
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    }
 
     // Keyboard & UI Navigation callbacks
     let ui_weak_nav = ui.as_weak();
@@ -622,6 +720,13 @@ fn main() -> anyhow::Result<()> {
         let mut poller = GilrsPoller::new();
         while r.load(Ordering::Relaxed) {
             let now = std::time::Instant::now();
+            // While a game (or any other window) is in front, Kiln ignores the controller
+            // entirely, including mouse mode and the exit chord.
+            if !kiln_sysctl::session::this_process_is_foreground() {
+                poller.suspend(now);
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                continue;
+            }
             let actions = poller.poll_actions(now);
             for action in actions {
                 if action == NavAction::EmergencyAbort {
@@ -631,6 +736,11 @@ fn main() -> anyhow::Result<()> {
                 let weak = ui_weak_poll.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
+                        let prompts = ui.global::<Prompts>();
+                        if !prompts.get_controller_enabled() {
+                            return; // Settings > Controller is off (emergency chord still works)
+                        }
+                        prompts.set_last_input_controller(true);
                         handle_nav_action(action, &ui);
                     }
                 });
@@ -639,9 +749,18 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Fullscreen behavior: if not in safe mode, request fullscreen
-    if !opts.safe {
-        ui.window().set_fullscreen(true);
+    // The startup screen comes first; Kiln goes full screen only after the user presses Start.
+    ui.set_show_launch(true);
+    ui.set_launch_dismissable(false);
+    refresh_launch();
+    // Sounds start once the first screen has settled, so initial state changes are silent.
+    {
+        let ui_weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(400), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.global::<Sfx>().set_ready(true);
+            }
+        });
     }
 
     let run_res = ui.run();
@@ -649,6 +768,24 @@ fn main() -> anyhow::Result<()> {
     let _ = poller_thread.join();
     run_res?;
     Ok(())
+}
+
+/// Moves Kiln to the chosen screen, then goes full screen there. This only places Kiln's
+/// own window; Windows display settings are untouched.
+fn place_window(ui: &MainWindow, m: &kiln_sysctl::monitors::MonitorInfo, is_safe: bool) {
+    let window = ui.window();
+    if window.is_fullscreen() {
+        window.set_fullscreen(false);
+    }
+    window.set_position(slint::PhysicalPosition::new(m.x + 40, m.y + 40));
+    if is_safe {
+        println!(
+            "[SAFE] Staying windowed on {} ({}x{})",
+            m.name, m.width, m.height
+        );
+    } else {
+        window.set_fullscreen(true);
+    }
 }
 
 #[cfg(test)]
@@ -668,33 +805,5 @@ mod tests {
         let time_str = get_current_time_str();
         assert_eq!(time_str.len(), 5);
         assert!(time_str.contains(':'));
-    }
-
-    #[test]
-    fn test_nav_action_navigation() {
-        let Ok(ui) = MainWindow::new() else {
-            // In headless CI environments without X11 or Wayland, window creation is gracefully skipped
-            return;
-        };
-        ui.set_selected_tab(0);
-        ui.set_focused_card_index(0);
-
-        handle_nav_action(NavAction::NextTab, &ui);
-        assert_eq!(ui.get_selected_tab(), 1);
-
-        handle_nav_action(NavAction::PrevTab, &ui);
-        assert_eq!(ui.get_selected_tab(), 0);
-
-        handle_nav_action(NavAction::ToggleMouseMode, &ui);
-        assert!(ui.get_status_message().contains("Mouse Mode: ON"));
-
-        handle_nav_action(NavAction::ToggleMouseMode, &ui);
-        assert_eq!(ui.get_status_message(), "");
-
-        handle_nav_action(NavAction::Back, &ui);
-        assert!(ui.get_show_power_menu());
-
-        handle_nav_action(NavAction::Back, &ui);
-        assert!(!ui.get_show_power_menu());
     }
 }

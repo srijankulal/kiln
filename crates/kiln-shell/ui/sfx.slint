@@ -1,0 +1,11 @@
+// Interface sounds. The UI only names a cue; Rust synthesizes and plays it (src/sound.rs
+// documents the sound rules). Cue names: move, bump, tab, adjust, toggle-on, toggle-off,
+// select, back, open, close, favorite, unfavorite, confirm, error, launch, boot.
+export global Sfx {
+    in-out property <bool> enabled: true;
+    in-out property <float> volume: 0.7;
+    // Stays false until the first screen has settled, so start-up state changes are silent.
+    in-out property <bool> ready: false;
+    // `variant` picks the pitch for position-based cues (focus index, tab index, direction).
+    callback play(string, int);
+}

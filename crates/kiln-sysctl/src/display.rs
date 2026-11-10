@@ -163,6 +163,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "changes real system settings; run manually on a test machine"]
     fn test_display_api_lifecycle() {
         let display = WindowsDisplay::new();
         // In headless CI without attached monitors or WDDM display drivers, gracefully handle absence

@@ -1,6 +1,19 @@
+// Kiln 10-foot shell. Layout and screens only: tokens live in theme.slint,
+// widgets in components.slint, icon codepoints in icons.slint, startup flow in launch.slint.
+import "../assets/fonts/Inter-Regular.ttf";
+import "../assets/fonts/Inter-SemiBold.ttf";
+import "../assets/fonts/JetBrainsMono-Regular.ttf";
+import "../assets/fonts/lucide.ttf";
+
 import { Theme } from "theme.slint";
-import { GameCard } from "game_card.slint";
-import { GamepadBadge } from "gamepad_badge.slint";
+import { Icons } from "icons.slint";
+import { Icon, KeyCap, Hint, Button, IconButton, NavTab, GameTile, SettingRow, SectionLabel, Dialog, MenuItem, Prompts } from "components.slint";
+import { LaunchScreen, LaunchApp, LaunchDisplay } from "launch.slint";
+import { BootScreen } from "boot.slint";
+import { Logo } from "logo.slint";
+import { Sfx } from "sfx.slint";
+
+export { Theme, Prompts, Sfx, LaunchApp, LaunchDisplay }
 
 export struct GameItem {
     id: string,
@@ -8,6 +21,8 @@ export struct GameItem {
     launcher: string,
     has_poster: bool,
     poster: image,
+    has_hero: bool,
+    hero: image,
     last_played: string,
     playtime_hours: string,
     is_favorite: bool,
@@ -15,50 +30,82 @@ export struct GameItem {
 
 export component MainWindow inherits Window {
     title: "Kiln";
-    default-font-family: "Segoe UI, sans-serif";
-    background: #080B12;
-    min-width: 1280px;
-    min-height: 720px;
+    icon: @image-url("../assets/kiln-512.png");
+    default-font-family: Theme.family-ui;
+    default-font-size: Theme.font-body;
+    background: Theme.bg;
+    min-width: 640px;
+    min-height: 360px;
+    preferred-width: 1280px;
+    preferred-height: 760px;
 
-    // View State
+    // ------------------------------------------------------------ library state
     in-out property <[GameItem]> games: [];
     in-out property <[GameItem]> recent_games: [];
-    in-out property <int> selected_tab: 0; // 0: All, 1: Recent, 2: Favorites, 3: Steam, 4: Epic, 5: Other, 6: Settings
+    in-out property <int> selected_tab: 0; // 0 All, 1 Recent, 2 Favorites, 3 Steam, 4 Epic, 5 Other, 6 Settings
     in-out property <int> focused_card_index: 0;
-    
-    // Modal State
-    in-out property <bool> show_game_detail: false;
     in-out property <GameItem> selected_game;
+
+    // ------------------------------------------------------------ overlays
+    in-out property <bool> show_game_detail: false;
     in-out property <bool> show_power_menu: false;
-    
-    // Game Mode Optimizer & Warning State
-    in-out property <bool> show_game_mode_prompt: false;
-    in-out property <bool> is_optimizing: false;
-    in-out property <string> opt_status_text: "Ready to dedicate system hardware exclusively to gaming.";
-    in-out property <float> opt_progress: 0.0;
-    in-out property <string> opt_report_text: "";
-    in-out property <bool> opt_completed: false;
-    
-    // System Status
+    in-out property <int> power_focus: 0; // 0 exit, 1 sleep, 2 restart, 3 shutdown
+
+    // ------------------------------------------------------------ startup screen
+    // Shown first on every launch, before Kiln goes full screen.
+    in-out property <bool> show_launch: true;
+    in-out property <bool> launch_dismissable: false;
+    in-out property <[LaunchApp]> launch_apps: [];
+    in-out property <[LaunchDisplay]> launch_displays: [];
+    in-out property <int> launch_display_choice: 0;
+    in-out property <int> launch_closing_count: 0;
+    in-out property <int> launch_inactive_external: 0;
+    in-out property <bool> launch_remember: true;
+    in-out property <int> launch_focus: 0;
+    in-out property <bool> launch_busy: false;
+    in-out property <string> launch_status: "";
+    in-out property <float> launch_progress: 0.0;
+
+    // ------------------------------------------------------------ loading screen
+    // Shown after Start while apps close and Kiln moves to its screen.
+    in-out property <bool> show_boot: false;
+    in-out property <string> boot_status: "";
+    in-out property <bool> boot_done: false;
+    in-out property <bool> boot_leaving: false;
+    in-out property <bool> boot_playing: false;
+
+    // ------------------------------------------------------------ system + settings
     in-out property <string> clock_time: "12:00";
-    in-out property <int> trim_tier: 1; // 0: Safe, 1: Default/Suspend, 2: Aggressive
     in-out property <bool> close_launcher_on_exit: false;
-    in-out property <string> display_info: "TV: 3840x2160 @ 120Hz";
+    in-out property <int> kept_apps_count: 0;
     in-out property <string> status_message: "";
+    in-out property <int> settings_focus: 0;
+    out property <int> settings_count: 16;
 
-    // Derived Carousel scroll offset for the primary shelf
-    property <length> carousel_scroll_offset: root.focused_card_index > 2 ? ((root.focused_card_index - 2) * 232px) : 0px;
+    // ------------------------------------------------------------ game folders dialog
+    in-out property <[string]> game_folders: [];
+    in-out property <bool> show_folders: false;
+    // 0..n-1 folders, n "Add folder", n+1 "Done"
+    in-out property <int> folders_focus: 0;
 
-    // Callbacks to Rust backend
+    // ------------------------------------------------------------ callbacks to Rust
     callback play_game(string);
     callback toggle_favorite(string);
     callback change_tab(int);
-    callback set_trim_tier(int);
     callback toggle_close_launcher();
     callback rescan_library();
     callback power_action(string); // "exit", "sleep", "restart", "shutdown"
-    callback trigger_game_mode_optimization();
-    callback dismiss_game_mode_prompt();
+    callback settings_changed();
+    callback open_launch();
+    callback clear_kept_apps();
+    callback add_game_folder();
+    callback remove_game_folder(int);
+    callback launch_set_app_close(int, bool);
+    callback launch_choose_display(int);
+    callback launch_toggle_remember();
+    callback launch_refresh();
+    callback launch_start();
+    callback launch_quit();
     callback nav_up();
     callback nav_down();
     callback nav_left();
@@ -69,1072 +116,932 @@ export component MainWindow inherits Window {
     callback nav_next_tab();
     callback nav_prev_tab();
 
-    // Top Level Key Handling & Auto-Focus
+    property <[{label: string, id: int}]> tabs: [
+        { label: "All games", id: 0 },
+        { label: "Recent", id: 1 },
+        { label: "Favorites", id: 2 },
+        { label: "Steam", id: 3 },
+        { label: "Epic", id: 4 },
+        { label: "Other", id: 5 },
+        { label: "Settings", id: 6 },
+    ];
+    property <[string]> shelf-titles: ["All games", "Recently played", "Favorites", "Steam", "Epic Games", "Other games"];
+    property <[string]> power-actions: ["exit", "sleep", "restart", "shutdown"];
+
+    // ------------------------------------------------------------ viewport scaling
+    init => {
+        root.update-viewport();
+        main-scope.focus();
+    }
+    changed width => { root.update-viewport(); }
+    changed height => { root.update-viewport(); }
+
+    function update-viewport() {
+        Theme.viewport-width = self.width;
+        Theme.viewport-height = self.height;
+        Theme.viewport-scale = min(self.width / 1920px, self.height / 1080px);
+    }
+
+    // ------------------------------------------------------------ settings logic
+    // Rows (index): 0 interface size, 1 text size, 2 tile size, 3 edge margin,
+    // 4 theme, 5 accent, 6 font, 7 animations, 8 interface sounds, 9 sound volume,
+    // 10 controller, 11 button prompts, 12 startup screen, 13 always-kept apps,
+    // 14 close launcher, 15 game folders.
+    pure function wrap(v: int, d: int, n: int) -> int {
+        if v + d < 0 { return n - 1; }
+        if v + d >= n { return 0; }
+        return v + d;
+    }
+
+    // Every value a setting row can change, so a step that changes nothing can bump.
+    pure function settings-snapshot() -> string {
+        return Theme.ui-scale + "|" + Theme.text-scale + "|" + Theme.tile-size + "|" + Theme.safe-area
+            + "|" + Theme.theme-preset + "|" + Theme.accent-preset + "|" + Theme.font-preset
+            + "|" + (Theme.animations ? "1" : "0") + "|" + (Sfx.enabled ? "1" : "0") + "|" + Sfx.volume
+            + "|" + (Prompts.controller-enabled ? "1" : "0") + "|" + Prompts.style
+            + "|" + (root.close_launcher_on_exit ? "1" : "0");
+    }
+    pure function is-toggle-row(index: int) -> bool {
+        return index == 7 || index == 8 || index == 10 || index == 14;
+    }
+    pure function toggle-row-on(index: int) -> bool {
+        return index == 7 ? Theme.animations : index == 8 ? Sfx.enabled
+            : index == 10 ? Prompts.controller-enabled : root.close_launcher_on_exit;
+    }
+    property <string> before-adjust;
+
+    // Called from Rust for keyboard/controller input and from the rows for mouse input.
+    // Plays adjust / toggle sounds, or a bump when the value can't move further.
+    public function adjust-setting(index: int, delta: int) {
+        root.before-adjust = root.settings-snapshot();
+        root.apply-setting(index, delta);
+        if root.settings-snapshot() == root.before-adjust {
+            Sfx.play("bump", 0);
+            return;
+        }
+        if root.is-toggle-row(index) {
+            Sfx.play(root.toggle-row-on(index) ? "toggle-on" : "toggle-off", 0);
+        } else {
+            Sfx.play("adjust", delta);
+        }
+        root.settings_changed();
+    }
+
+    function apply-setting(index: int, delta: int) {
+        if index == 0 {
+            Theme.ui-scale = max(0.8, min(1.4, round((Theme.ui-scale + delta * 0.1) * 10) / 10));
+        } else if index == 1 {
+            Theme.text-scale = max(0.9, min(1.3, round((Theme.text-scale + delta * 0.1) * 10) / 10));
+        } else if index == 2 {
+            Theme.tile-size = max(0, min(2, Theme.tile-size + delta));
+        } else if index == 3 {
+            Theme.safe-area = max(0, min(5, Theme.safe-area + delta));
+        } else if index == 4 {
+            Theme.theme-preset = root.wrap(Theme.theme-preset, delta, Theme.theme-names.length);
+        } else if index == 5 {
+            Theme.accent-preset = root.wrap(Theme.accent-preset, delta, Theme.accent-names.length);
+        } else if index == 6 {
+            Theme.font-preset = root.wrap(Theme.font-preset, delta, Theme.font-preset-count);
+        } else if index == 7 {
+            Theme.animations = delta > 0;
+        } else if index == 8 {
+            Sfx.enabled = delta > 0;
+        } else if index == 9 {
+            Sfx.volume = max(0.1, min(1.0, round((Sfx.volume + delta * 0.1) * 10) / 10));
+        } else if index == 10 {
+            Prompts.controller-enabled = delta > 0;
+        } else if index == 11 {
+            Prompts.style = max(0, min(2, Prompts.style + delta));
+        } else if index == 14 {
+            if (delta > 0) != root.close_launcher_on_exit {
+                root.toggle_close_launcher();
+            }
+        }
+    }
+
+    public function activate-setting(index: int) {
+        if index == 2 {
+            root.adjust-setting(2, Theme.tile-size == 2 ? -2 : 1);
+        } else if index == 4 || index == 5 || index == 6 {
+            root.adjust-setting(index, 1);
+        } else if index == 7 {
+            root.adjust-setting(7, Theme.animations ? -1 : 1);
+        } else if index == 8 {
+            root.adjust-setting(8, Sfx.enabled ? -1 : 1);
+        } else if index == 10 {
+            root.adjust-setting(10, Prompts.controller-enabled ? -1 : 1);
+        } else if index == 11 {
+            root.adjust-setting(11, Prompts.style == 2 ? -2 : 1);
+        } else if index == 12 {
+            root.open_launch();
+        } else if index == 13 {
+            if root.kept_apps_count > 0 {
+                root.clear_kept_apps();
+                Sfx.play("confirm", 0);
+            } else {
+                Sfx.play("bump", 0);
+            }
+        } else if index == 14 {
+            root.adjust-setting(14, root.close_launcher_on_exit ? -1 : 1);
+        } else if index == 15 {
+            root.folders_focus = root.game_folders.length;
+            root.show_folders = true;
+        } else {
+            Sfx.play("bump", 0); // sliders change with left/right, not select
+        }
+    }
+
+    pure function pct(v: float) -> string {
+        return round(v * 100) + "%";
+    }
+
+    // Settings list geometry (fixed row heights so focus can be scrolled into view).
+    property <length> row-h: 40px * Theme.k + 56px * Theme.kt;
+    property <length> row-gap: Theme.space-xs;
+    property <length> label-h: 32px * Theme.k + 24px * Theme.kt;
+    pure function row-y(i: int) -> length {
+        return i * (root.row-h + root.row-gap) + (i < 4 ? 1 : i < 8 ? 2 : i < 10 ? 3 : i < 12 ? 4 : i < 15 ? 5 : 6) * root.label-h;
+    }
+
+    // ------------------------------------------------------------ sounds for state changes
+    // Mouse and keyboard/controller change the same properties, so both sound the same.
+    // Overlapping cues from one gesture are resolved by priority in src/sound.rs.
+    changed focused_card_index => { Sfx.play("move", self.focused_card_index); }
+    changed settings_focus => { Sfx.play("move", self.settings_focus); }
+    changed power_focus => { Sfx.play("move", self.power_focus); }
+    changed launch_focus => { Sfx.play("move", self.launch_focus); }
+    changed selected_tab => { Sfx.play("tab", self.selected_tab); }
+    changed show_game_detail => { Sfx.play(self.show_game_detail ? "open" : "close", 0); }
+    changed show_power_menu => { Sfx.play(self.show_power_menu ? "open" : "close", 0); }
+    changed show_folders => { Sfx.play(self.show_folders ? "open" : "close", 0); }
+    changed folders_focus => { Sfx.play("move", self.folders_focus); }
+    changed show_launch => {
+        if !self.show_boot { Sfx.play(self.show_launch ? "open" : "close", 0); }
+    }
+
+    function rescan-with-sound() {
+        Sfx.play("select", 0);
+        if root.show_launch { root.launch_refresh(); } else { root.rescan_library(); }
+    }
+
+    // ------------------------------------------------------------ input
     forward-focus: main-scope;
-    init => { main-scope.focus(); }
 
     main-scope := FocusScope {
         key-pressed(event) => {
-            // Modal intercept for Game Mode Optimization Prompt
-            if (root.show_game_mode_prompt) {
-                if (event.text == Key.Return || event.text == " ") {
-                    if (root.opt_completed) {
-                        root.dismiss_game_mode_prompt();
-                    } else if (!root.is_optimizing) {
-                        root.trigger_game_mode_optimization();
-                    }
-                    return accept;
-                }
-                if (event.text == Key.Escape || event.text == Key.Backspace) {
-                    if (!root.is_optimizing) {
-                        root.dismiss_game_mode_prompt();
-                    }
-                    return accept;
-                }
-                return accept;
-            }
-
-            // Standard Keyboard & Controller navigation
-            if (event.text == Key.Escape || event.text == Key.Backspace) {
-                root.nav_back();
-                return accept;
-            }
-            if (event.text == Key.Tab || event.text == "e" || event.text == "E" || event.text == "]") {
-                root.nav_next_tab();
-                return accept;
-            }
-            if (event.text == "q" || event.text == "Q" || event.text == "[") {
-                root.nav_prev_tab();
-                return accept;
-            }
-            if (event.text == Key.LeftArrow || event.text == "a" || event.text == "A") {
-                root.nav_left();
-                return accept;
-            }
-            if (event.text == Key.RightArrow || event.text == "d" || event.text == "D") {
-                root.nav_right();
-                return accept;
-            }
-            if (event.text == Key.UpArrow || event.text == "w" || event.text == "W") {
-                root.nav_up();
-                return accept;
-            }
-            if (event.text == Key.DownArrow || event.text == "s" || event.text == "S") {
-                root.nav_down();
-                return accept;
-            }
-            if (event.text == Key.Return || event.text == " ") {
-                root.nav_select();
-                return accept;
-            }
-            if (event.text == "f" || event.text == "F" || event.text == "x" || event.text == "X") {
-                root.nav_favorite();
-                return accept;
-            }
+            Prompts.last-input-controller = false;
+            if root.show_boot { return accept; } // nothing to do until loading finishes
+            if (event.text == Key.Escape || event.text == Key.Backspace) { root.nav_back(); return accept; }
+            if (event.text == Key.Tab || event.text == "e" || event.text == "E" || event.text == "]") { root.nav_next_tab(); return accept; }
+            if (event.text == "q" || event.text == "Q" || event.text == "[") { root.nav_prev_tab(); return accept; }
+            if (event.text == Key.LeftArrow || event.text == "a" || event.text == "A") { root.nav_left(); return accept; }
+            if (event.text == Key.RightArrow || event.text == "d" || event.text == "D") { root.nav_right(); return accept; }
+            if (event.text == Key.UpArrow || event.text == "w" || event.text == "W") { root.nav_up(); return accept; }
+            if (event.text == Key.DownArrow || event.text == "s" || event.text == "S") { root.nav_down(); return accept; }
+            if (event.text == Key.Return || event.text == " ") { root.nav_select(); return accept; }
+            if (event.text == "f" || event.text == "F" || event.text == "x" || event.text == "X") { root.nav_favorite(); return accept; }
             if (event.text == "r" || event.text == "R" || event.text == "y" || event.text == "Y") {
-                root.rescan_library();
-                return accept;
-            }
-            if (event.text == "o" || event.text == "O") {
-                root.show_game_mode_prompt = true;
+                root.rescan-with-sound();
                 return accept;
             }
             return reject;
         }
 
-        // Fullscreen atmospheric backdrop
-        Rectangle {
-            width: 100%;
-            height: 100%;
-            background: @linear-gradient(180deg, #0C121D 0%, #07090E 50%, #04060A 100%);
-
-            // Subtle top glow flare
-            Rectangle {
-                width: 70%;
-                height: 200px;
-                y: -100px;
-                x: (parent.width - self.width) / 2;
-                background: @radial-gradient(circle, #00D2FF14 0%, #00000000 70%);
-            }
-
-            // Main Content Layout within TV safe margins
-            VerticalLayout {
-                padding-left: 44px;
-                padding-right: 44px;
-                padding-top: 24px;
-                padding-bottom: 24px;
-                spacing: 16px;
-                alignment: space-between;
-
-                // 1. TOP HEADER BAR
-                HorizontalLayout {
-                    height: 48px;
-                    alignment: space-between;
-
-                    // Left: Logo + Tab Switcher
-                    HorizontalLayout {
-                        spacing: 24px;
-                        alignment: start;
-
-                        // Brand Emblem
-                        HorizontalLayout {
-                            spacing: 10px;
-                            alignment: center;
-
-                            Rectangle {
-                                width: 32px;
-                                height: 32px;
-                                border-radius: 8px;
-                                background: @linear-gradient(135deg, #FF5533 0%, #B91C1C 100%);
-                                border-width: 1px;
-                                border-color: #FFAA88;
-                                y: 8px;
-
-                                Text {
-                                    text: "▲";
-                                    color: #FFFFFF;
-                                    font-size: 15px;
-                                    font-weight: 900;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            Text {
-                                text: "KILN";
-                                color: #FFFFFF;
-                                font-size: 20px;
-                                font-weight: 900;
-                                letter-spacing: 2px;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        // Divider
-                        Rectangle {
-                            width: 1px;
-                            height: 22px;
-                            background: #FFFFFF15;
-                            y: 13px;
-                        }
-
-                        // Category Tab Bar
-                        HorizontalLayout {
-                            spacing: 6px;
-                            alignment: center;
-
-                            // Tab 0: All
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 0 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 0 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "ALL";
-                                        color: root.selected_tab == 0 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 0; root.change_tab(0); }
-                                }
-                            }
-
-                            // Tab 1: Recent
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 1 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 1 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "RECENT";
-                                        color: root.selected_tab == 1 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 1; root.change_tab(1); }
-                                }
-                            }
-
-                            // Tab 2: Favorites
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 2 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 2 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "FAVORITES";
-                                        color: root.selected_tab == 2 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 2; root.change_tab(2); }
-                                }
-                            }
-
-                            // Tab 3: Steam
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 3 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 3 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "STEAM";
-                                        color: root.selected_tab == 3 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 3; root.change_tab(3); }
-                                }
-                            }
-
-                            // Tab 4: Epic
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 4 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 4 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "EPIC";
-                                        color: root.selected_tab == 4 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 4; root.change_tab(4); }
-                                }
-                            }
-
-                            // Tab 5: Settings
-                            Rectangle {
-                                height: 32px;
-                                border-radius: 16px;
-                                background: root.selected_tab == 6 ? #00D2FF22 : #00000000;
-                                border-width: root.selected_tab == 6 ? 1px : 0px;
-                                border-color: #00D2FF80;
-                                y: 8px;
-
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    Text {
-                                        text: "SETTINGS";
-                                        color: root.selected_tab == 6 ? #00D2FF : #8A98AC;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        letter-spacing: 0.5px;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected_tab = 6; root.change_tab(6); }
-                                }
-                            }
-                        }
-                    }
-
-                    // Right: Clock, Optimizer Trigger, & Power
-                    HorizontalLayout {
-                        spacing: 16px;
-                        alignment: end;
-
-                        // Quick Game Mode Trigger
-                        Rectangle {
-                            height: 32px;
-                            border-radius: 16px;
-                            background: #00D2FF18;
-                            border-width: 1px;
-                            border-color: #00D2FF60;
-                            y: 8px;
-
-                            HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 12px;
-                                spacing: 6px;
-
-                                Text {
-                                    text: "⚡";
-                                    font-size: 13px;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: "GAME MODE";
-                                    color: #00D2FF;
-                                    font-size: 12px;
-                                    font-weight: 800;
-                                    letter-spacing: 0.8px;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.show_game_mode_prompt = true; }
-                            }
-                        }
-
-                        // Digital Clock
-                        Text {
-                            text: root.clock_time;
-                            color: #FFFFFF;
-                            font-size: 18px;
-                            font-weight: 700;
-                            vertical-alignment: center;
-                        }
-
-                        // Power Button
-                        Rectangle {
-                            width: 36px;
-                            height: 36px;
-                            border-radius: 18px;
-                            background: #1E293B80;
-                            border-width: 1px;
-                            border-color: #FF553380;
-                            y: 6px;
-
-                            Text {
-                                text: "⏻";
-                                color: #FF5533;
-                                font-size: 17px;
-                                font-weight: 900;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.show_power_menu = true; }
-                            }
-                        }
-                    }
-                }
-
-                // 2. MAIN VIEW AREA (GAMES LIBRARY OR SETTINGS)
-                if (root.selected_tab != 6): VerticalLayout {
-                    spacing: 18px;
-
-                    // Hero Showcase Banner (Dynamic spotlight on active game)
-                    if (root.selected_game.title != ""): Rectangle {
-                        height: 110px;
-                        border-radius: 16px;
-                        background: @linear-gradient(90deg, #131C2DB8 0%, #0A111EB0 50%, #00000000 100%);
-                        border-width: 1px;
-                        border-color: #24355280;
-
-                        HorizontalLayout {
-                            padding-left: 24px;
-                            padding-right: 24px;
-                            alignment: space-between;
-
-                            // Left: Title + Badges
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 8px;
-
-                                Text {
-                                    text: root.selected_game.title;
-                                    color: #FFFFFF;
-                                    font-size: 26px;
-                                    font-weight: 900;
-                                    letter-spacing: 0.5px;
-                                    overflow: elide;
-                                }
-
-                                HorizontalLayout {
-                                    spacing: 12px;
-                                    alignment: start;
-
-                                    // Launcher Tag
-                                    Rectangle {
-                                        height: 22px;
-                                        border-radius: 6px;
-                                        background: root.selected_game.launcher == "Steam" ? #1A78C2 :
-                                                   (root.selected_game.launcher == "Epic" ? #334155 :
-                                                   (root.selected_game.launcher == "Xbox" ? #107C10 : #7C3AED));
-
-                                        HorizontalLayout {
-                                            padding-left: 8px;
-                                            padding-right: 8px;
-                                            Text {
-                                                text: root.selected_game.launcher;
-                                                color: #FFFFFF;
-                                                font-size: 11px;
-                                                font-weight: 800;
-                                                letter-spacing: 0.5px;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-
-                                    if (root.selected_game.playtime_hours != ""): Text {
-                                        text: "⏱ " + root.selected_game.playtime_hours + " PLAYED";
-                                        color: #94A3B8;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-
-                                    if (root.selected_game.last_played != ""): Text {
-                                        text: "•  LAST PLAYED: " + root.selected_game.last_played;
-                                        color: #64748B;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        vertical-alignment: center;
-                                    }
-
-                                    if (root.selected_game.is_favorite): Text {
-                                        text: "★ FAVORITE";
-                                        color: #FBBF24;
-                                        font-size: 12px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-
-                            // Right: Prominent Play Button Trigger
-                            HorizontalLayout {
-                                spacing: 14px;
-                                alignment: center;
-
-                                Rectangle {
-                                    height: 44px;
-                                    border-radius: 12px;
-                                    background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
-                                    border-width: 1px;
-                                    border-color: #88EEFF;
-
-                                    HorizontalLayout {
-                                        padding-left: 20px;
-                                        padding-right: 20px;
-                                        spacing: 8px;
-                                        alignment: center;
-
-                                        Text {
-                                            text: "▶";
-                                            color: #050A14;
-                                            font-size: 14px;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: "PLAY (Enter)";
-                                            color: #050A14;
-                                            font-size: 14px;
-                                            font-weight: 900;
-                                            letter-spacing: 0.5px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.play_game(root.selected_game.id); }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Shelf Header
-                    HorizontalLayout {
-                        alignment: space-between;
-                        Text {
-                            text: root.selected_tab == 0 ? "ALL GAMES" :
-                                  (root.selected_tab == 1 ? "RECENTLY PLAYED" :
-                                  (root.selected_tab == 2 ? "FAVORITES" :
-                                  (root.selected_tab == 3 ? "STEAM LIBRARY" :
-                                  (root.selected_tab == 4 ? "EPIC GAMES" : "OTHER TITLES"))));
-                            color: #FFFFFF;
-                            font-size: 14px;
-                            font-weight: 800;
-                            letter-spacing: 1px;
-                        }
-
-                        Text {
-                            text: root.games.length + " TITLES";
-                            color: #00D2FF;
-                            font-size: 12px;
-                            font-weight: 800;
-                            letter-spacing: 0.5px;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    // Primary Game Carousel Shelf (Single, fluid ribbon)
-                    if (root.games.length > 0): Rectangle {
-                        height: 330px;
-                        clip: true;
-
-                        HorizontalLayout {
-                            x: -root.carousel_scroll_offset;
-                            animate x { duration: 160ms; easing: ease-out; }
-                            spacing: 20px;
-                            alignment: start;
-
-                            for game[index] in root.games: GameCard {
-                                title: game.title;
-                                launcher: game.launcher;
-                                has_poster: game.has_poster;
-                                poster: game.poster;
-                                is_favorite: game.is_favorite;
-                                is_card_focused: root.focused_card_index == index;
-
-                                clicked => {
-                                    root.selected_game = game;
-                                    root.focused_card_index = index;
-                                    root.show_game_detail = true;
-                                }
-                            }
-                        }
-                    }
-
-                    // Empty Library State
-                    if (root.games.length == 0): Rectangle {
-                        height: 330px;
-                        border-radius: 16px;
-                        background: #0D142460;
-                        border-width: 1px;
-                        border-color: #24355240;
-
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 14px;
-
-                            Text {
-                                text: "🎮";
-                                font-size: 40px;
-                                horizontal-alignment: center;
-                            }
-
-                            Text {
-                                text: "No games found in this category";
-                                color: #FFFFFF;
-                                font-size: 18px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-
-                            Rectangle {
-                                width: 180px;
-                                height: 40px;
-                                border-radius: 8px;
-                                background: #00D2FF;
-                                x: (parent.width - self.width) / 2;
-
-                                HorizontalLayout {
-                                    alignment: center;
-                                    spacing: 6px;
-                                    Text {
-                                        text: "↻ Rescan Library";
-                                        color: #050A14;
-                                        font-size: 13px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                                TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.rescan_library(); }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3. SETTINGS TAB (Clean 3-Card Dashboard)
-                if (root.selected_tab == 6): VerticalLayout {
-                    spacing: 16px;
-
-                    Text {
-                        text: "SYSTEM & CONSOLE SETTINGS";
-                        color: #FFFFFF;
-                        font-size: 20px;
-                        font-weight: 900;
-                        letter-spacing: 1px;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 20px;
-                        alignment: space-between;
-
-                        // Card 1: Performance & Process Optimizer
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            height: 420px;
-                            border-radius: 14px;
-                            background: #0E1628B0;
-                            border-width: 1px;
-                            border-color: #24355280;
-
-                            VerticalLayout {
-                                padding: 22px;
-                                spacing: 14px;
-
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    Text { text: "⚡"; font-size: 20px; vertical-alignment: center; }
-                                    Text {
-                                        text: "Game Mode Optimizer";
-                                        color: #00D2FF;
-                                        font-size: 17px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                Text {
-                                    text: "Closes background consumer apps and flushes system RAM to dedicate maximum GPU/CPU power to games.";
-                                    color: #94A3B8;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
-
-                                Rectangle {
-                                    height: 44px;
-                                    border-radius: 8px;
-                                    background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
-
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: 8px;
-                                        Text {
-                                            text: "⚡ Run Game Mode Optimizer";
-                                            color: #050A14;
-                                            font-size: 13px;
-                                            font-weight: 900;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    TouchArea {
-                                        mouse-cursor: pointer;
-                                        clicked => { root.show_game_mode_prompt = true; }
-                                    }
-                                }
-
-                                Text {
-                                    text: "Trimming Tier Selection:";
-                                    color: #CBD5E1;
-                                    font-size: 12px;
-                                    font-weight: 700;
-                                }
-
-                                Rectangle {
-                                    height: 44px;
-                                    border-radius: 8px;
-                                    background: root.trim_tier == 0 ? #00D2FF25 : #131E33;
-                                    border-width: root.trim_tier == 0 ? 2px : 1px;
-                                    border-color: root.trim_tier == 0 ? #00D2FF : #243552;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-                                        Text { text: "Tier 0: EcoQoS (Power Throttling)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                        if (root.trim_tier == 0): Text { text: "ACTIVE"; color: #00D2FF; font-size: 11px; font-weight: 900; vertical-alignment: center; }
-                                    }
-                                    TouchArea { mouse-cursor: pointer; clicked => { root.set_trim_tier(0); } }
-                                }
-
-                                Rectangle {
-                                    height: 44px;
-                                    border-radius: 8px;
-                                    background: root.trim_tier == 1 ? #00D2FF25 : #131E33;
-                                    border-width: root.trim_tier == 1 ? 2px : 1px;
-                                    border-color: root.trim_tier == 1 ? #00D2FF : #243552;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-                                        Text { text: "Tier 1: Suspend (Default Console)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                        if (root.trim_tier == 1): Text { text: "ACTIVE"; color: #00D2FF; font-size: 11px; font-weight: 900; vertical-alignment: center; }
-                                    }
-                                    TouchArea { mouse-cursor: pointer; clicked => { root.set_trim_tier(1); } }
-                                }
-                            }
-                        }
-
-                        // Card 2: Display & Television Setup
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            height: 420px;
-                            border-radius: 14px;
-                            background: #0E1628B0;
-                            border-width: 1px;
-                            border-color: #24355280;
-
-                            VerticalLayout {
-                                padding: 22px;
-                                spacing: 14px;
-
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    Text { text: "📺"; font-size: 20px; vertical-alignment: center; }
-                                    Text {
-                                        text: "TV & Display Topology";
-                                        color: #00D2FF;
-                                        font-size: 17px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                Text {
-                                    text: "Configure 10-foot TV resolution, HDR output, and secondary screen isolation.";
-                                    color: #94A3B8;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
-
-                                Rectangle {
-                                    height: 60px;
-                                    border-radius: 8px;
-                                    background: #131E33;
-                                    border-width: 1px;
-                                    border-color: #243552;
-
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        alignment: center;
-                                        Text { text: "Primary Target"; color: #64748B; font-size: 11px; font-weight: 700; }
-                                        Text { text: root.display_info; color: #FFFFFF; font-size: 13px; font-weight: 800; }
-                                    }
-                                }
-
-                                Rectangle {
-                                    height: 44px;
-                                    border-radius: 8px;
-                                    background: #131E33;
-                                    border-width: 1px;
-                                    border-color: #243552;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-                                        Text { text: "Overscan Safe Margins (5%)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                        Text { text: "ENABLED"; color: #10B981; font-size: 11px; font-weight: 900; vertical-alignment: center; }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Card 3: Shell Behavior
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            height: 420px;
-                            border-radius: 14px;
-                            background: #0E1628B0;
-                            border-width: 1px;
-                            border-color: #24355280;
-
-                            VerticalLayout {
-                                padding: 22px;
-                                spacing: 14px;
-
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    Text { text: "🎮"; font-size: 20px; vertical-alignment: center; }
-                                    Text {
-                                        text: "Shell & Behavior";
-                                        color: #00D2FF;
-                                        font-size: 17px;
-                                        font-weight: 800;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                Text {
-                                    text: "Configure launcher exit rules, controller chord bindings, and automatic updates.";
-                                    color: #94A3B8;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                }
-
-                                Rectangle {
-                                    height: 48px;
-                                    border-radius: 8px;
-                                    background: #131E33;
-                                    border-width: 1px;
-                                    border-color: #243552;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-                                        Text { text: "Close Launcher on Game Exit"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                        Text { text: root.close_launcher_on_exit ? "YES" : "NO"; color: root.close_launcher_on_exit ? #00D2FF : #64748B; font-size: 11px; font-weight: 900; vertical-alignment: center; }
-                                    }
-                                    TouchArea { mouse-cursor: pointer; clicked => { root.toggle_close_launcher(); } }
-                                }
-
-                                Rectangle {
-                                    height: 48px;
-                                    border-radius: 8px;
-                                    background: #131E33;
-                                    border-width: 1px;
-                                    border-color: #243552;
-
-                                    HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        alignment: space-between;
-                                        Text { text: "Emergency Abort Chord (Back+Start)"; color: #FFFFFF; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                                        Text { text: "5 SECONDS"; color: #FF5533; font-size: 11px; font-weight: 900; vertical-alignment: center; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 4. BOTTOM FOOTER BAR (Clean shortcuts & controls)
-                HorizontalLayout {
-                    height: 36px;
-                    alignment: space-between;
-
-                    // Left: Gamepad controls
-                    HorizontalLayout {
-                        spacing: 12px;
-                        alignment: start;
-
-                        GamepadBadge { btn: "A"; btn_color: #10B981; label: "Play"; }
-                        GamepadBadge { btn: "B"; btn_color: #EF4444; label: "Back"; }
-                        GamepadBadge { btn: "X"; btn_color: #3B82F6; label: "Favorite"; }
-                        GamepadBadge { btn: "Y"; btn_color: #F59E0B; label: "Rescan"; }
-                        GamepadBadge { btn: "LB/RB"; btn_color: #64748B; is_pill: true; label: "Tabs"; }
-                    }
-
-                    // Right: Keyboard shortcuts
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: end;
-
-                        Rectangle {
-                            height: 28px;
-                            border-radius: 14px;
-                            background: #FFFFFF0D;
-                            border-width: 1px;
-                            border-color: #FFFFFF15;
-
-                            HorizontalLayout {
-                                padding-left: 12px;
-                                padding-right: 12px;
-                                Text {
-                                    text: "⌨ [WASD/Arrows] Move   [Enter] Play   [Esc] Back   [Tab] Category   [O] Game Mode";
-                                    color: #94A3B8;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ==========================================
-    // MODAL DIALOGS
-    // ==========================================
-
-    // 1. GAME DETAIL MODAL
-    if (root.show_game_detail): Rectangle {
-        width: 100%;
-        height: 100%;
-        background: #03060FCC;
-
-        TouchArea { clicked => { root.show_game_detail = false; } }
-
-        Rectangle {
-            width: 780px;
-            height: 480px;
-            border-radius: 20px;
-            background: @linear-gradient(180deg, #121828 0%, #0A0F1A 100%);
-            border-width: 1px;
-            border-color: #00D2FF60;
-            drop-shadow-blur: 32px;
-            drop-shadow-color: #000000D0;
+        // ======================================================== backdrop
+        Rectangle { background: Theme.bg; }
+
+        // Focused game's artwork fills the upper screen behind the info block.
+        if root.selected_tab != 6 && root.games.length > 0: Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: max(parent.height * 0.62, parent.width / 3.1);
             clip: true;
 
+            if root.selected_game.has_hero: Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.selected_game.hero;
+                image-fit: cover;
+                horizontal-alignment: right;
+            }
+            if !root.selected_game.has_hero && root.selected_game.has_poster: Image {
+                x: parent.width * 0.45;
+                width: parent.width * 0.55;
+                height: parent.height;
+                source: root.selected_game.poster;
+                image-fit: cover;
+                opacity: 0.35;
+            }
+            // Fade artwork into the slate background. Only two-stop gradients: multi-stop
+            // gradients with alpha show banding seams on the software renderer.
+            Rectangle { background: Theme.bg.transparentize(0.55); }
+            Rectangle {
+                x: 0px;
+                width: parent.width * 0.75;
+                background: @linear-gradient(90deg, Theme.bg 0%, Theme.bg.transparentize(1) 100%);
+            }
+            Rectangle {
+                y: parent.height * 0.35;
+                height: parent.height * 0.65;
+                background: @linear-gradient(0deg, Theme.bg 0%, Theme.bg.transparentize(1) 100%);
+            }
+            Rectangle {
+                y: 0px;
+                height: parent.height * 0.3;
+                background: @linear-gradient(180deg, Theme.bg.transparentize(0.3) 0%, Theme.bg.transparentize(1) 100%);
+            }
+        }
+
+        // ======================================================== foreground
+        VerticalLayout {
+            padding-top: Theme.margin-y;
+            padding-bottom: Theme.margin-y;
+            spacing: Theme.space-lg;
+
+            // ---------------------------------------------------- top bar
             HorizontalLayout {
-                padding: 30px;
-                spacing: 28px;
+                padding-left: Theme.margin-x;
+                padding-right: Theme.margin-x;
+                spacing: Theme.space-lg;
+                height: 56px * Theme.k;
 
-                // Poster
-                Rectangle {
-                    width: 250px;
-                    height: 100%;
-                    border-radius: 12px;
-                    background: #151D30;
-                    border-width: 1px;
-                    border-color: #FFFFFF20;
-                    clip: true;
-
-                    if (root.selected_game.has_poster): Image {
-                        width: 100%;
-                        height: 100%;
-                        source: root.selected_game.poster;
-                        image-fit: cover;
-                    }
-
-                    if (!root.selected_game.has_poster): VerticalLayout {
+                HorizontalLayout {
+                    spacing: Theme.space-sm;
+                    horizontal-stretch: 0; // brand never takes the tabs' space
+                    VerticalLayout {
                         alignment: center;
-                        spacing: 12px;
-                        Text { text: "🎮"; font-size: 40px; horizontal-alignment: center; }
-                        Text { text: root.selected_game.title; color: #FFFFFF; font-size: 16px; font-weight: 800; horizontal-alignment: center; wrap: word-wrap; }
+                        Logo { size: 44px * Theme.k; }
+                    }
+                    if !Theme.compact-h: Text {
+                        text: "KILN";
+                        font-family: Theme.family-display;
+                        font-size: Theme.font-body-lg;
+                        font-weight: Theme.weight-semibold;
+                        letter-spacing: 4px * Theme.kt;
+                        color: Theme.text;
+                        vertical-alignment: center;
                     }
                 }
 
-                // Details & Actions
-                VerticalLayout {
-                    spacing: 16px;
-                    alignment: space-between;
+                Rectangle { width: Theme.space-sm; }
 
-                    VerticalLayout {
-                        spacing: 10px;
-
-                        Text {
-                            text: root.selected_game.title;
-                            color: #FFFFFF;
-                            font-size: 28px;
-                            font-weight: 900;
-                            wrap: word-wrap;
-                        }
-
-                        HorizontalLayout {
-                            spacing: 10px;
-                            Rectangle {
-                                height: 24px;
-                                border-radius: 6px;
-                                background: root.selected_game.launcher == "Steam" ? #1A78C2 : #334155;
-                                HorizontalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 8px;
-                                    Text { text: root.selected_game.launcher; color: #FFFFFF; font-size: 11px; font-weight: 800; vertical-alignment: center; }
-                                }
-                            }
-                            if (root.selected_game.playtime_hours != ""): Text { text: "⏱ " + root.selected_game.playtime_hours; color: #94A3B8; font-size: 12px; font-weight: 700; vertical-alignment: center; }
-                        }
-
-                        if (root.selected_game.last_played != ""): Text {
-                            text: "Last played: " + root.selected_game.last_played;
-                            color: #64748B;
-                            font-size: 12px;
+                // Tabs clip (rather than push the clock off-screen) if they still don't fit.
+                Rectangle {
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                    clip: true;
+                    HorizontalLayout {
+                    x: 0px;
+                    width: self.preferred-width;
+                    spacing: Theme.space-xxs;
+                    if !Theme.compact-h: VerticalLayout { alignment: center; KeyCap { key: "LB"; wide: true; } }
+                    for tab in root.tabs: NavTab {
+                        label: tab.label;
+                        selected: root.selected_tab == tab.id;
+                        clicked => {
+                            root.selected_tab = tab.id;
+                            root.focused_card_index = 0;
+                            root.change_tab(tab.id);
                         }
                     }
+                    if !Theme.compact-h: VerticalLayout { alignment: center; KeyCap { key: "RB"; wide: true; } }
+                    }
+                }
 
-                    // Action buttons
+                HorizontalLayout {
+                    spacing: Theme.space-md;
+                    horizontal-stretch: 0;
+                    Text {
+                        text: root.clock_time;
+                        font-family: Theme.family-display;
+                        font-size: Theme.font-body-lg;
+                        font-weight: Theme.weight-semibold;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                    }
                     VerticalLayout {
-                        spacing: 12px;
-
-                        Rectangle {
-                            height: 50px;
-                            border-radius: 12px;
-                            background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
-
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 10px;
-                                Text { text: "▶"; color: #050A14; font-size: 16px; vertical-alignment: center; }
-                                Text { text: "PLAY NOW (Enter)"; color: #050A14; font-size: 15px; font-weight: 900; vertical-alignment: center; }
-                            }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    root.show_game_detail = false;
-                                    root.play_game(root.selected_game.id);
-                                }
+                        alignment: center;
+                        IconButton {
+                            icon: Icons.power;
+                            label: "Power options";
+                            clicked => {
+                                root.power_focus = 0;
+                                root.show_power_menu = true;
                             }
                         }
+                    }
+                }
+            }
 
-                        Rectangle {
-                            height: 44px;
-                            border-radius: 10px;
-                            background: #1E293B80;
-                            border-width: 1px;
-                            border-color: #334155;
+            // ---------------------------------------------------- library view
+            if root.selected_tab != 6: VerticalLayout {
+                spacing: Theme.compact-v ? Theme.space-md : Theme.space-xl;
+                vertical-stretch: 1;
 
+                Rectangle { vertical-stretch: 1; }
+
+                // Spotlight: focused game title, stats and actions.
+                if root.games.length > 0: HorizontalLayout {
+                    padding-left: Theme.margin-x;
+                    padding-right: Theme.margin-x;
+                    VerticalLayout {
+                        spacing: Theme.space-md;
+                        max-width: Theme.viewport-width * 0.7;
+
+                        if !Theme.compact-v: Text {
+                            text: root.selected_game.launcher;
+                            color: Theme.accent-fg;
+                            font-size: Theme.font-small;
+                            font-weight: Theme.weight-semibold;
+                            letter-spacing: Theme.tracking-wide;
+                        }
+                        Text {
+                            text: root.selected_game.title;
+                            color: Theme.text;
+                            font-family: Theme.family-display;
+                            font-size: Theme.font-display;
+                            font-weight: Theme.weight-semibold;
+                            letter-spacing: Theme.tracking-tight;
+                            overflow: elide;
+                        }
+                        if !Theme.compact-v: HorizontalLayout {
+                            spacing: Theme.space-lg;
+                            alignment: start;
                             HorizontalLayout {
-                                alignment: center;
-                                spacing: 8px;
-                                Text { text: root.selected_game.is_favorite ? "★ In Favorites" : "☆ Add to Favorites (F)"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+                                spacing: Theme.space-xs;
+                                Icon { glyph: Icons.clock; size: Theme.icon-sm; color: Theme.text-muted; }
+                                Text { text: root.selected_game.playtime_hours; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
                             }
-                            TouchArea {
-                                mouse-cursor: pointer;
+                            if root.selected_game.last_played != "": HorizontalLayout {
+                                spacing: Theme.space-xs;
+                                Icon { glyph: Icons.history; size: Theme.icon-sm; color: Theme.text-muted; }
+                                Text { text: "Played " + root.selected_game.last_played; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
+                            }
+                            if root.selected_game.is_favorite: HorizontalLayout {
+                                spacing: Theme.space-xs;
+                                Icon { glyph: Icons.star; size: Theme.icon-sm; color: Theme.accent-fg; }
+                                Text { text: "Favorite"; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: Theme.space-md;
+                            alignment: start;
+                            padding-top: Theme.space-xs;
+                            Button {
+                                text: "Play";
+                                icon: Icons.play;
+                                variant: "primary";
+                                clicked => { root.play_game(root.selected_game.id); }
+                            }
+                            Button {
+                                text: "Details";
+                                icon: Icons.info;
+                                variant: "secondary";
+                                clicked => { root.show_game_detail = true; }
+                            }
+                            Button {
+                                text: root.selected_game.is_favorite ? "Favorited" : "Favorite";
+                                icon: Icons.star;
+                                variant: "secondary";
                                 clicked => {
                                     root.toggle_favorite(root.selected_game.id);
                                     root.selected_game.is_favorite = !root.selected_game.is_favorite;
                                 }
                             }
                         }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
 
-                        Rectangle {
-                            height: 40px;
-                            border-radius: 8px;
-                            background: #111827;
+                // Shelf header
+                if !Theme.compact-v || root.games.length == 0: HorizontalLayout {
+                    padding-left: Theme.margin-x;
+                    padding-right: Theme.margin-x;
+                    spacing: Theme.space-md;
+                    alignment: start;
+                    Text {
+                        text: root.shelf-titles[root.selected_tab];
+                        color: Theme.text;
+                        font-family: Theme.family-display;
+                        font-size: Theme.font-title;
+                        font-weight: Theme.weight-semibold;
+                        vertical-alignment: bottom;
+                    }
+                    Text {
+                        text: root.games.length == 1 ? "1 title" : root.games.length + " titles";
+                        color: Theme.text-muted;
+                        font-size: Theme.font-body;
+                        vertical-alignment: bottom;
+                    }
+                }
 
+                // Shelf: one row of tiles, bleeding to the screen edges.
+                if root.games.length > 0: shelf := Rectangle {
+                    property <length> pitch: Theme.tile-width + Theme.tile-gap;
+                    property <length> pad: Theme.focus-ring * 4;
+                    property <length> content-w: root.games.length * pitch - Theme.tile-gap;
+                    property <length> visible-w: self.width - Theme.margin-x * 2;
+                    property <length> offset: max(0px, min((root.focused_card_index - 1) * pitch, content-w - visible-w));
+                    height: Theme.tile-height + Theme.tile-lift + pad * 2;
+                    clip: true;
+
+                    HorizontalLayout {
+                        x: Theme.margin-x - shelf.offset;
+                        y: Theme.tile-lift + shelf.pad;
+                        width: shelf.content-w;
+                        height: Theme.tile-height;
+                        spacing: Theme.tile-gap;
+                        animate x { duration: Theme.motion-normal; easing: ease-out; }
+
+                        for game[index] in root.games: GameTile {
+                            title: game.title;
+                            launcher: game.launcher;
+                            has-poster: game.has_poster;
+                            poster: game.poster;
+                            favorite: game.is_favorite;
+                            focused: root.focused_card_index == index;
+                            clicked => {
+                                root.focused_card_index = index;
+                                root.selected_game = game;
+                                root.show_game_detail = true;
+                            }
+                        }
+                    }
+                }
+
+                // Empty state
+                if root.games.length == 0: HorizontalLayout {
+                    padding-left: Theme.margin-x;
+                    padding-right: Theme.margin-x;
+                    Rectangle {
+                        height: Theme.tile-height;
+                        border-radius: Theme.radius-xl;
+                        background: Theme.surface-1;
+                        border-width: Theme.hairline;
+                        border-color: Theme.border;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: Theme.space-md;
+                            Icon { glyph: root.selected_tab == 2 ? Icons.star : Icons.library; size: Theme.icon-lg; color: Theme.text-faint; }
+                            Text {
+                                text: "Nothing here yet";
+                                color: Theme.text;
+                                font-family: Theme.family-display;
+                                font-size: Theme.font-title;
+                                font-weight: Theme.weight-semibold;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: root.selected_tab == 2 ? "Press X on any game to pin it here."
+                                    : root.selected_tab == 1 ? "Games you play will show up here."
+                                    : "Kiln didn't find any games from this source.";
+                                color: Theme.text-muted;
+                                font-size: Theme.font-body;
+                                horizontal-alignment: center;
+                            }
                             HorizontalLayout {
                                 alignment: center;
-                                Text { text: "Close (Esc)"; color: #94A3B8; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                padding-top: Theme.space-xs;
+                                Button {
+                                    text: "Rescan library";
+                                    icon: Icons.refresh;
+                                    keycap: "Y";
+                                    variant: "secondary";
+                                    clicked => { root.rescan-with-sound(); }
+                                }
                             }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.show_game_detail = false; }
+                        }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- settings view
+            if root.selected_tab == 6: HorizontalLayout {
+                padding-left: Theme.margin-x;
+                padding-right: Theme.margin-x;
+                spacing: Theme.space-xxl;
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    horizontal-stretch: 3;
+                    spacing: Theme.space-lg;
+
+                    VerticalLayout {
+                        spacing: Theme.space-xxs;
+                        padding-top: Theme.space-lg;
+                        Text {
+                            text: "Settings";
+                            color: Theme.text;
+                            font-family: Theme.family-display;
+                            font-size: Theme.font-headline;
+                            font-weight: Theme.weight-semibold;
+                        }
+                        if !Theme.compact-v: Text {
+                            text: "Changes apply instantly and are saved on this device.";
+                            color: Theme.text-muted;
+                            font-size: Theme.font-body;
+                        }
+                    }
+
+                    list := Flickable {
+                        vertical-stretch: 1;
+                        content-height: root.row-y(root.settings_count) + Theme.space-lg;
+
+                        property <int> focus-index: root.settings_focus;
+                        changed focus-index => { list.follow-focus(); }
+                        changed height => { list.follow-focus(); }
+                        // Start the view exactly at a row (or the very top), never mid-row: show as
+                        // many whole rows above the focused one as fit in half the list.
+                        function follow-focus() {
+                            list.content-y = -max(0px, min(
+                                root.settings_focus - floor((list.height - root.row-h) / 2 / (root.row-h + root.row-gap)) <= 0 ? 0px
+                                    : root.row-y(root.settings_focus - floor((list.height - root.row-h) / 2 / (root.row-h + root.row-gap))) - root.label-h,
+                                list.content-height - list.height));
+                        }
+
+                        VerticalLayout {
+                            spacing: root.row-gap;
+                            alignment: start;
+
+                            SectionLabel { text: "DISPLAY"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.scaling;
+                                label: "Interface size";
+                                description: "Scales the whole interface for your screen and seating distance.";
+                                kind: 0;
+                                value: root.pct(Theme.ui-scale);
+                                progress: (Theme.ui-scale - 0.8) / 0.6;
+                                focused: root.settings_focus == 0;
+                                adjust(d) => { root.adjust-setting(0, d); }
+                                pointer-entered => { root.settings_focus = 0; }
                             }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.text-size;
+                                label: "Text size";
+                                description: "Makes text larger or smaller on top of the interface size.";
+                                kind: 0;
+                                value: root.pct(Theme.text-scale);
+                                progress: (Theme.text-scale - 0.9) / 0.4;
+                                focused: root.settings_focus == 1;
+                                adjust(d) => { root.adjust-setting(1, d); }
+                                pointer-entered => { root.settings_focus = 1; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.grid;
+                                label: "Game tile size";
+                                description: "How large posters appear on the library shelf.";
+                                kind: 1;
+                                options: ["Small", "Medium", "Large"];
+                                selected-option: Theme.tile-size;
+                                focused: root.settings_focus == 2;
+                                choose(i) => { root.adjust-setting(2, i - Theme.tile-size); }
+                                pointer-entered => { root.settings_focus = 2; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.maximize;
+                                label: "Screen edge margin";
+                                description: "Adds space at the edges if your TV crops the picture.";
+                                kind: 0;
+                                value: Theme.safe-area + "%";
+                                progress: Theme.safe-area / 5;
+                                focused: root.settings_focus == 3;
+                                adjust(d) => { root.adjust-setting(3, d); }
+                                pointer-entered => { root.settings_focus = 3; }
+                            }
+
+                            SectionLabel { text: "APPEARANCE"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.palette;
+                                label: "Theme";
+                                description: "Colour scheme for backgrounds and panels.";
+                                kind: 1;
+                                options: Theme.theme-names;
+                                selected-option: Theme.theme-preset;
+                                focused: root.settings_focus == 4;
+                                choose(i) => { root.adjust-setting(4, i - Theme.theme-preset); }
+                                pointer-entered => { root.settings_focus = 4; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.flame;
+                                label: "Accent colour";
+                                description: Theme.accent-names[Theme.accent-preset] + " highlights for focus, buttons and switches.";
+                                kind: 4;
+                                swatches: Theme.accent-swatches;
+                                selected-option: Theme.accent-preset;
+                                focused: root.settings_focus == 5;
+                                choose(i) => { root.adjust-setting(5, i - Theme.accent-preset); }
+                                pointer-entered => { root.settings_focus = 5; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.type;
+                                label: "Font";
+                                description: "Typeface used across the interface.";
+                                kind: 1;
+                                options: Theme.font-preset-names;
+                                selected-option: Theme.font-preset;
+                                focused: root.settings_focus == 6;
+                                choose(i) => { root.adjust-setting(6, i - Theme.font-preset); }
+                                pointer-entered => { root.settings_focus = 6; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.sparkles;
+                                label: "Animations";
+                                description: "Motion when moving focus and opening menus.";
+                                kind: 2;
+                                on: Theme.animations;
+                                focused: root.settings_focus == 7;
+                                activate => { root.activate-setting(7); }
+                                pointer-entered => { root.settings_focus = 7; }
+                            }
+
+                            SectionLabel { text: "SOUND"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.volume;
+                                label: "Interface sounds";
+                                description: "Soft tones for moving, selecting and the startup chime.";
+                                kind: 2;
+                                on: Sfx.enabled;
+                                focused: root.settings_focus == 8;
+                                activate => { root.activate-setting(8); }
+                                pointer-entered => { root.settings_focus = 8; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.volume-low;
+                                label: "Sound volume";
+                                description: Sfx.enabled ? "Relative to the Windows volume." : "Turn on interface sounds to hear changes.";
+                                kind: 0;
+                                value: root.pct(Sfx.volume);
+                                progress: (Sfx.volume - 0.1) / 0.9;
+                                focused: root.settings_focus == 9;
+                                adjust(d) => { root.adjust-setting(9, d); }
+                                pointer-entered => { root.settings_focus = 9; }
+                            }
+
+                            SectionLabel { text: "CONTROLS"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.gamepad;
+                                label: "Controller";
+                                description: "Navigate Kiln with a gamepad. Back + Start (hold 5 s) always exits.";
+                                kind: 2;
+                                on: Prompts.controller-enabled;
+                                focused: root.settings_focus == 10;
+                                activate => { root.activate-setting(10); }
+                                pointer-entered => { root.settings_focus = 10; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.keyboard;
+                                label: "Button hints";
+                                description: "Auto shows controller buttons after you use a gamepad.";
+                                kind: 1;
+                                options: ["Auto", "Keyboard", "Controller"];
+                                selected-option: Prompts.style;
+                                focused: root.settings_focus == 11;
+                                choose(i) => { root.adjust-setting(11, i - Prompts.style); }
+                                pointer-entered => { root.settings_focus = 11; }
+                            }
+
+                            SectionLabel { text: "STARTUP & APPS"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.monitor;
+                                label: "Startup screen";
+                                description: "Choose apps to close and which screen Kiln uses.";
+                                kind: 3;
+                                value: "Open";
+                                focused: root.settings_focus == 12;
+                                activate => { root.activate-setting(12); }
+                                pointer-entered => { root.settings_focus = 12; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.lock;
+                                label: "Always-kept apps";
+                                description: root.kept_apps_count == 0 ? "None yet. Choose Keep on the startup screen to add apps."
+                                    : root.kept_apps_count == 1 ? "1 app is never closed by Kiln."
+                                    : root.kept_apps_count + " apps are never closed by Kiln.";
+                                kind: 3;
+                                value: root.kept_apps_count == 0 ? "" : "Clear list";
+                                focused: root.settings_focus == 13;
+                                activate => { root.activate-setting(13); }
+                                pointer-entered => { root.settings_focus = 13; }
+                            }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.log-out;
+                                label: "Close launcher after playing";
+                                description: "Quits Steam or Epic when you exit a game.";
+                                kind: 2;
+                                on: root.close_launcher_on_exit;
+                                focused: root.settings_focus == 14;
+                                activate => { root.activate-setting(14); }
+                                pointer-entered => { root.settings_focus = 14; }
+                            }
+
+                            SectionLabel { text: "LIBRARY"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.folder;
+                                label: "Game folders";
+                                description: root.game_folders.length == 0 ? "Add folders with games that aren't on Steam or Epic."
+                                    : root.game_folders.length == 1 ? "1 folder. Each game in it shows up in your library."
+                                    : root.game_folders.length + " folders. Each game in them shows up in your library.";
+                                kind: 3;
+                                value: "Manage";
+                                focused: root.settings_focus == 15;
+                                activate => { root.activate-setting(15); }
+                                pointer-entered => { root.settings_focus = 15; }
+                            }
+                        }
+                    }
+                }
+
+                // Side panel: live display facts and controls reference (scrolls if it can't fit).
+                Flickable {
+                    horizontal-stretch: 2;
+                    content-height: side.preferred-height;
+                    side := VerticalLayout {
+                    width: parent.width;
+                    padding-top: Theme.space-lg;
+                    spacing: Theme.space-lg;
+                    alignment: start;
+
+                    Rectangle {
+                        border-radius: Theme.radius-lg;
+                        background: Theme.surface-1;
+                        border-width: Theme.hairline;
+                        border-color: Theme.border;
+                        VerticalLayout {
+                            padding: Theme.space-lg;
+                            spacing: Theme.space-md;
+                            SectionLabel { text: "THIS SCREEN"; }
+                            for fact in [
+                                { k: "Window", v: round(Theme.viewport-width / 1px) + " × " + round(Theme.viewport-height / 1px) },
+                                { k: "Effective scale", v: root.pct(Theme.k) },
+                                { k: "Font", v: Theme.font-preset-names[Theme.font-preset] },
+                            ]: HorizontalLayout {
+                                Text { text: fact.k; color: Theme.text-muted; font-size: Theme.font-body; horizontal-stretch: 1; }
+                                Text { text: fact.v; color: Theme.text; font-family: Theme.family-mono; font-size: Theme.font-body; }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        border-radius: Theme.radius-lg;
+                        background: Theme.surface-1;
+                        border-width: Theme.hairline;
+                        border-color: Theme.border;
+                        VerticalLayout {
+                            padding: Theme.space-lg;
+                            spacing: Theme.space-md;
+                            SectionLabel { text: "CONTROLS"; }
+                            Hint { key: "A"; label: "Select or change"; }
+                            Hint { key: "B"; label: "Back / power menu"; }
+                            Hint { key: "X"; label: "Favorite game"; }
+                            Hint { key: "Y"; label: "Rescan library"; }
+                            HorizontalLayout {
+                                spacing: Theme.space-xs;
+                                VerticalLayout { alignment: center; horizontal-stretch: 0; KeyCap { key: "LB"; } }
+                                VerticalLayout { alignment: center; horizontal-stretch: 0; KeyCap { key: "RB"; } }
+                                Text { text: "Switch tabs"; color: Theme.text-muted; font-size: Theme.font-small; vertical-alignment: center; horizontal-stretch: 1; }
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.space-xs;
+                                Icon { glyph: Icons.alert; size: Theme.icon-sm; color: Theme.warning; }
+                                Text {
+                                    text: "Hold Back + Start for 5 seconds to exit to the desktop.";
+                                    color: Theme.text-muted;
+                                    font-size: Theme.font-small;
+                                    wrap: word-wrap;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+
+            // ---------------------------------------------------- footer
+            HorizontalLayout {
+                padding-left: Theme.margin-x;
+                padding-right: Theme.margin-x;
+                spacing: Theme.space-lg;
+                height: 40px * Theme.kt;
+
+                if root.status_message != "": HorizontalLayout {
+                    spacing: Theme.space-xs;
+                    Icon { glyph: Icons.info; size: Theme.icon-sm; color: Theme.accent-fg; }
+                    Text { text: root.status_message; color: Theme.text-muted; font-size: Theme.font-small; vertical-alignment: center; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if root.selected_tab != 6: Hint { key: "A"; label: "Open"; }
+                if root.selected_tab == 6: Hint { key: "A"; label: "Change"; }
+                Hint { key: "B"; label: "Menu"; }
+                if root.selected_tab != 6: Hint { key: "X"; label: "Favorite"; }
+                if root.selected_tab != 6: Hint { key: "Y"; label: "Rescan"; }
+            }
+        }
+    }
+
+    // ============================================================ game details
+    if root.show_game_detail: Rectangle {
+        background: Theme.scrim;
+        TouchArea { clicked => { root.show_game_detail = false; } }
+
+        Dialog {
+            width: min(1180px * Theme.k, parent.width - Theme.margin-x * 2);
+            height: min(640px * Theme.k, parent.height - Theme.margin-y * 2);
+            TouchArea {}
+
+            HorizontalLayout {
+                padding: Theme.space-xl;
+                spacing: Theme.space-xl;
+
+                Rectangle {
+                    width: self.height / 1.5;
+                    border-radius: Theme.radius-lg;
+                    background: Theme.surface-2;
+                    clip: true;
+                    if root.selected_game.has_poster: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.selected_game.poster;
+                        image-fit: cover;
+                    }
+                    if !root.selected_game.has_poster: Icon { glyph: Icons.gamepad; size: Theme.icon-lg; color: Theme.text-faint; }
+                }
+
+                VerticalLayout {
+                    spacing: Theme.space-md;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.selected_game.launcher;
+                        color: Theme.accent-fg;
+                        font-size: Theme.font-small;
+                        font-weight: Theme.weight-semibold;
+                        letter-spacing: Theme.tracking-wide;
+                    }
+                    Text {
+                        text: root.selected_game.title;
+                        color: Theme.text;
+                        font-family: Theme.family-display;
+                        font-size: Theme.font-headline;
+                        font-weight: Theme.weight-semibold;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: Theme.space-xs; }
+                    for fact in [
+                        { icon: Icons.clock, k: "Play time", v: root.selected_game.playtime_hours },
+                        { icon: Icons.history, k: "Last played", v: root.selected_game.last_played != "" ? root.selected_game.last_played : "Never" },
+                        { icon: Icons.library, k: "Library", v: root.selected_game.launcher },
+                    ]: HorizontalLayout {
+                        spacing: Theme.space-sm;
+                        Icon { glyph: fact.icon; size: Theme.icon-sm; color: Theme.text-muted; width: 32px * Theme.kt; }
+                        Text { text: fact.k; color: Theme.text-muted; font-size: Theme.font-body; width: 200px * Theme.kt; vertical-alignment: center; }
+                        Text { text: fact.v; color: Theme.text; font-size: Theme.font-body; vertical-alignment: center; }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: Theme.space-md;
+                        alignment: start;
+                        Button {
+                            text: "Play";
+                            icon: Icons.play;
+                            keycap: "A";
+                            variant: "primary";
+                            clicked => {
+                                root.show_game_detail = false;
+                                root.play_game(root.selected_game.id);
+                            }
+                        }
+                        Button {
+                            text: root.selected_game.is_favorite ? "Favorited" : "Favorite";
+                            icon: Icons.star;
+                            keycap: "X";
+                            variant: "secondary";
+                            clicked => {
+                                root.toggle_favorite(root.selected_game.id);
+                                root.selected_game.is_favorite = !root.selected_game.is_favorite;
+                            }
+                        }
+                        Button {
+                            text: "Close";
+                            keycap: "B";
+                            variant: "ghost";
+                            clicked => { root.show_game_detail = false; }
                         }
                     }
                 }
@@ -1142,222 +1049,125 @@ export component MainWindow inherits Window {
         }
     }
 
-    // 2. POWER MENU MODAL
-    if (root.show_power_menu): Rectangle {
-        width: 100%;
-        height: 100%;
-        background: #03060FCC;
-
+    // ============================================================ power menu
+    if root.show_power_menu: Rectangle {
+        background: Theme.scrim;
         TouchArea { clicked => { root.show_power_menu = false; } }
 
-        Rectangle {
-            width: 420px;
-            height: 340px;
-            border-radius: 16px;
-            background: #0E1628;
-            border-width: 1px;
-            border-color: #243552;
-            drop-shadow-blur: 32px;
-            drop-shadow-color: #000000;
+        Dialog {
+            width: min(560px * Theme.k, parent.width - Theme.margin-x * 2);
+            height: pm.preferred-height;
+            TouchArea {}
 
-            VerticalLayout {
-                padding: 24px;
-                spacing: 12px;
-                alignment: space-between;
-
-                Text { text: "POWER OPTIONS"; color: #FFFFFF; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
-
-                Rectangle {
-                    height: 48px;
-                    border-radius: 10px;
-                    background: #162032;
-                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "⏾"; color: #00D2FF; font-size: 16px; vertical-alignment: center; } Text { text: "Sleep System"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
-                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("sleep"); } }
+            pm := VerticalLayout {
+                padding: Theme.space-lg;
+                spacing: Theme.space-xs;
+                VerticalLayout {
+                    padding: Theme.space-xs;
+                    padding-bottom: Theme.space-md;
+                    spacing: Theme.space-xxs;
+                    Text { text: "Power"; color: Theme.text; font-family: Theme.family-display; font-size: Theme.font-title; font-weight: Theme.weight-semibold; }
+                    Text { text: "Kiln restores your desktop settings before exiting."; color: Theme.text-muted; font-size: Theme.font-small; wrap: word-wrap; }
                 }
-
-                Rectangle {
-                    height: 48px;
-                    border-radius: 10px;
-                    background: #162032;
-                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "✕"; color: #CBD5E1; font-size: 16px; vertical-alignment: center; } Text { text: "Exit to Desktop (Esc)"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
-                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("exit"); } }
-                }
-
-                Rectangle {
-                    height: 48px;
-                    border-radius: 10px;
-                    background: #162032;
-                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "↻"; color: #F59E0B; font-size: 16px; vertical-alignment: center; } Text { text: "Restart PC"; color: #FFFFFF; font-size: 13px; font-weight: 700; vertical-alignment: center; } }
-                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("restart"); } }
-                }
-
-                Rectangle {
-                    height: 48px;
-                    border-radius: 10px;
-                    background: #2D1418;
-                    border-width: 1px;
-                    border-color: #EF444460;
-                    HorizontalLayout { padding-left: 18px; spacing: 10px; Text { text: "⏻"; color: #EF4444; font-size: 16px; vertical-alignment: center; } Text { text: "Shut Down PC"; color: #EF4444; font-size: 13px; font-weight: 800; vertical-alignment: center; } }
-                    TouchArea { mouse-cursor: pointer; clicked => { root.show_power_menu = false; root.power_action("shutdown"); } }
+                for item[i] in [
+                    { icon: Icons.log-out, label: "Exit to desktop", danger: false },
+                    { icon: Icons.moon, label: "Sleep", danger: false },
+                    { icon: Icons.rotate-ccw, label: "Restart", danger: false },
+                    { icon: Icons.power, label: "Shut down", danger: true },
+                ]: MenuItem {
+                    icon: item.icon;
+                    label: item.label;
+                    danger: item.danger;
+                    focused: root.power_focus == i;
+                    pointer-entered => { root.power_focus = i; }
+                    clicked => {
+                        root.show_power_menu = false;
+                        root.power_action(root.power-actions[i]);
+                    }
                 }
             }
         }
     }
 
-    // 3. GAME MODE GATEWAY & PERFORMANCE MODAL
-    if (root.show_game_mode_prompt): Rectangle {
-        width: 100%;
-        height: 100%;
-        background: #03060FE4;
+    // ============================================================ game folders
+    if root.show_folders: Rectangle {
+        background: Theme.scrim;
+        TouchArea { clicked => { root.show_folders = false; } }
 
-        TouchArea {}
+        Dialog {
+            width: min(860px * Theme.k, parent.width - Theme.margin-x * 2);
+            height: min(fd.preferred-height, parent.height - Theme.margin-y * 2);
+            TouchArea {}
 
-        Rectangle {
-            width: 740px;
-            height: 490px;
-            border-radius: 18px;
-            background: @linear-gradient(180deg, #121828 0%, #0A0E18 100%);
-            border-width: 2px;
-            border-color: root.opt_completed ? #10B981 : #00D2FF80;
-            drop-shadow-blur: 32px;
-            drop-shadow-color: #000000;
-            clip: true;
-
-            VerticalLayout {
-                padding: 28px;
-                spacing: 16px;
-                alignment: space-between;
-
-                // Header
-                HorizontalLayout {
-                    alignment: space-between;
-                    VerticalLayout {
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: "⚡"; color: #00D2FF; font-size: 18px; vertical-alignment: center; }
-                            Text { text: "KILN CONSOLE GAME MODE"; color: #00D2FF; font-size: 18px; font-weight: 900; letter-spacing: 1px; vertical-alignment: center; }
-                        }
-                        Text { text: "Dedicating maximum GPU, CPU, and RAM exclusively to gaming"; color: #94A3B8; font-size: 12px; }
-                    }
-                    if (!root.is_optimizing): Rectangle {
-                        width: 32px; height: 32px; border-radius: 16px; background: #FFFFFF10;
-                        Text { text: "✕"; color: #FFFFFF80; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
-                        TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
+            fd := VerticalLayout {
+                padding: Theme.space-lg;
+                spacing: Theme.space-xs;
+                VerticalLayout {
+                    padding: Theme.space-xs;
+                    padding-bottom: Theme.space-md;
+                    spacing: Theme.space-xxs;
+                    Text { text: "Game folders"; color: Theme.text; font-family: Theme.family-display; font-size: Theme.font-title; font-weight: Theme.weight-semibold; }
+                    Text {
+                        text: "Each folder, shortcut or game .exe directly inside these folders shows up as a game. Removing a folder only hides its games from Kiln; nothing is deleted.";
+                        color: Theme.text-muted;
+                        font-size: Theme.font-small;
+                        wrap: word-wrap;
                     }
                 }
-
-                // Info Cards
-                if (!root.is_optimizing && !root.opt_completed): VerticalLayout {
-                    spacing: 12px;
-
-                    Rectangle {
-                        height: 100px;
-                        border-radius: 10px;
-                        background: #1C1214;
-                        border-width: 1px;
-                        border-color: #FF453A40;
-
-                        HorizontalLayout {
-                            padding: 14px;
-                            spacing: 14px;
-                            Text { text: "⚠️"; font-size: 24px; vertical-alignment: center; }
-                            VerticalLayout {
-                                spacing: 3px;
-                                alignment: center;
-                                Text { text: "PLEASE SAVE YOUR WORK IN OTHER APPS"; color: #FF6961; font-size: 13px; font-weight: 800; }
-                                Text { text: "Game Mode terminates unnecessary background apps (browsers, chat, code editors, media players) to reclaim physical RAM and minimize system latency."; color: #CBD5E1; font-size: 11px; wrap: word-wrap; }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        height: 100px;
-                        border-radius: 10px;
-                        background: #0D1C16;
-                        border-width: 1px;
-                        border-color: #10B98140;
-
-                        HorizontalLayout {
-                            padding: 14px;
-                            spacing: 14px;
-                            Text { text: "🛡️"; font-size: 24px; vertical-alignment: center; }
-                            VerticalLayout {
-                                spacing: 3px;
-                                alignment: center;
-                                Text { text: "SAFETY PACKET (0% Corruption Guarantee)"; color: #34D399; font-size: 13px; font-weight: 800; }
-                                Text { text: "Windows Kernel, File Systems, Storage Drivers, Audio, Display, Defender, and Anti-Cheat Engines are strictly protected and will NEVER be touched."; color: #CBD5E1; font-size: 11px; wrap: word-wrap; }
-                            }
-                        }
-                    }
+                for folder[i] in root.game_folders: MenuItem {
+                    icon: Icons.folder;
+                    label: folder;
+                    hint: "Remove";
+                    focused: root.folders_focus == i;
+                    pointer-entered => { root.folders_focus = i; }
+                    clicked => { root.remove_game_folder(i); }
                 }
-
-                // Progress View
-                if (root.is_optimizing): VerticalLayout {
-                    spacing: 20px;
-                    alignment: center;
-
-                    Text { text: "OPTIMIZING SYSTEM HARDWARE"; color: #FFFFFF; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
-                    Text { text: root.opt_status_text; color: #00D2FF; font-size: 13px; horizontal-alignment: center; }
-
-                    Rectangle {
-                        height: 10px;
-                        border-radius: 5px;
-                        background: #1E293B;
-                        clip: true;
-                        Rectangle { x: 0px; width: root.opt_progress * parent.width; height: 100%; background: @linear-gradient(90deg, #00D2FF 0%, #3B82F6 100%); }
-                    }
+                MenuItem {
+                    icon: Icons.folder-plus;
+                    label: "Add a folder…";
+                    focused: root.folders_focus == root.game_folders.length;
+                    pointer-entered => { root.folders_focus = root.game_folders.length; }
+                    clicked => { root.add_game_folder(); }
                 }
-
-                // Completed View
-                if (root.opt_completed): VerticalLayout {
-                    spacing: 14px;
-                    alignment: center;
-
-                    Text { text: "✓ CONSOLE GAME MODE ACTIVE"; color: #10B981; font-size: 18px; font-weight: 900; horizontal-alignment: center; }
-                    Text { text: root.opt_report_text != "" ? root.opt_report_text : "1,420 MB RAM Reclaimed • Tasks Optimized"; color: #FFFFFF; font-size: 16px; font-weight: 800; horizontal-alignment: center; }
-                    Text { text: "System latency minimized. Physical memory dedicated to games."; color: #94A3B8; font-size: 12px; horizontal-alignment: center; }
-                }
-
-                // Footer Buttons
-                HorizontalLayout {
-                    spacing: 14px;
-                    alignment: end;
-
-                    if (!root.is_optimizing && !root.opt_completed): HorizontalLayout {
-                        spacing: 14px;
-
-                        Rectangle {
-                            width: 220px;
-                            height: 46px;
-                            border-radius: 10px;
-                            background: #1E293B80;
-                            border-width: 1px;
-                            border-color: #334155;
-                            HorizontalLayout { alignment: center; Text { text: "Continue Windowed (Esc)"; color: #CBD5E1; font-size: 12px; font-weight: 700; vertical-alignment: center; } }
-                            TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
-                        }
-
-                        Rectangle {
-                            width: 240px;
-                            height: 46px;
-                            border-radius: 10px;
-                            background: @linear-gradient(135deg, #00D2FF 0%, #0088CC 100%);
-                            HorizontalLayout { alignment: center; Text { text: "⚡ Activate Game Mode (Enter)"; color: #050A14; font-size: 12px; font-weight: 900; vertical-alignment: center; } }
-                            TouchArea { mouse-cursor: pointer; clicked => { root.trigger_game_mode_optimization(); } }
-                        }
-                    }
-
-                    if (root.opt_completed): Rectangle {
-                        width: 240px;
-                        height: 46px;
-                        border-radius: 10px;
-                        background: @linear-gradient(135deg, #10B981 0%, #059669 100%);
-                        HorizontalLayout { alignment: center; Text { text: "Enter Dashboard (Enter)"; color: #FFFFFF; font-size: 13px; font-weight: 900; vertical-alignment: center; } }
-                        TouchArea { mouse-cursor: pointer; clicked => { root.dismiss_game_mode_prompt(); } }
-                    }
+                MenuItem {
+                    icon: Icons.check;
+                    label: "Done";
+                    focused: root.folders_focus == root.game_folders.length + 1;
+                    pointer-entered => { root.folders_focus = root.game_folders.length + 1; }
+                    clicked => { root.show_folders = false; }
                 }
             }
         }
+    }
+
+    // ============================================================ startup screen
+    if root.show_launch: LaunchScreen {
+        apps: root.launch_apps;
+        displays: root.launch_displays;
+        display-choice: root.launch_display_choice;
+        closing-count: root.launch_closing_count;
+        inactive-external: root.launch_inactive_external;
+        remember: root.launch_remember;
+        focus-index: root.launch_focus;
+        busy: root.launch_busy;
+        status: root.launch_status;
+        progress: root.launch_progress;
+        dismissable: root.launch_dismissable;
+        set-app-close(i, v) => { root.launch_set_app_close(i, v); }
+        choose-display(i) => { root.launch_choose_display(i); }
+        toggle-remember => { root.launch_toggle_remember(); }
+        refresh => { root.rescan-with-sound(); }
+        start-clicked => { root.launch_start(); }
+        quit => { root.launch_quit(); }
+        dismiss => { root.show_launch = false; }
+        hover-focus(i) => { root.launch_focus = i; }
+    }
+
+    // ============================================================ loading screen
+    if root.show_boot: BootScreen {
+        status: root.boot_status;
+        done: root.boot_done;
+        leaving: root.boot_leaving;
+        playing: root.boot_playing;
     }
 }

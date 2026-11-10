@@ -306,6 +306,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "changes real system settings; run manually on a test machine"]
     fn test_crash_recovery_from_unclean_journal() {
         let dir = tempdir().unwrap();
         let journal_path = dir.path().join("session.json");

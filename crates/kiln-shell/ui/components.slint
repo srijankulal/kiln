@@ -1,0 +1,613 @@
+// Reusable Kiln widgets. Every colour, size and font comes from Theme.
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+
+export component Icon inherits Text {
+    in property <string> glyph;
+    in property <length> size: Theme.icon-md;
+    text: glyph;
+    font-family: Theme.family-icons;
+    font-size: size;
+    color: Theme.text;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+    accessible-role: none;
+}
+
+// Which button glyphs to show. Hints are written with controller names (A, B, X, Y, LB, RB)
+// and translated to keyboard keys unless a controller is the active input.
+export global Prompts {
+    in-out property <int> style: 0;                 // 0 auto, 1 keyboard, 2 controller
+    in-out property <bool> last-input-controller: false;
+    in-out property <bool> controller-enabled: true;
+    out property <bool> controller: style == 2 || (style == 0 && controller-enabled && last-input-controller);
+
+    public pure function key(button: string) -> string {
+        if controller {
+            return button;
+        }
+        return button == "A" ? "Enter" : button == "B" ? "Esc" : button == "X" ? "F"
+            : button == "Y" ? "R" : button == "LB" ? "Q" : button == "RB" ? "E" : button;
+    }
+}
+
+// Monochrome controller / keyboard button hint (no rainbow face buttons).
+// Face buttons render as circles on controller, keys as rounded keycaps.
+export component KeyCap inherits Rectangle {
+    in property <string> key;           // logical button: A, B, X, Y, LB, RB
+    in property <bool> wide: false;     // kept for compatibility; width now follows the label
+    in property <bool> inverted: false; // for use on accent fills
+    property <string> label: Prompts.key(root.key);
+    property <bool> round: Prompts.controller && (key == "A" || key == "B" || key == "X" || key == "Y");
+    property <color> ink: inverted ? Theme.on-accent : Theme.text-muted;
+    height: 30px * Theme.kt;
+    min-width: self.height;
+    border-radius: round ? self.height / 2 : Theme.radius-sm;
+    border-width: 2px * Theme.k;
+    border-color: ink;
+    accessible-role: none;
+    HorizontalLayout {
+        padding-left: root.round ? 0px : 8px * Theme.k;
+        padding-right: root.round ? 0px : 8px * Theme.k;
+        Text {
+            text: root.label;
+            color: root.ink;
+            font-family: Theme.family-ui;
+            font-size: 14px * Theme.kt;
+            font-weight: Theme.weight-semibold;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component Hint inherits HorizontalLayout {
+    in property <string> key;
+    in property <bool> wide: false;
+    in property <string> label;
+    spacing: Theme.space-xs;
+    alignment: start;
+    KeyCap {
+        key: root.key;
+        wide: root.wide;
+        y: (parent.height - self.height) / 2;
+    }
+    Text {
+        text: root.label;
+        color: Theme.text-muted;
+        font-size: Theme.font-small;
+        vertical-alignment: center;
+    }
+}
+
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> keycap;
+    in property <string> variant: "primary"; // primary | secondary | ghost
+    in property <bool> focused: false;
+    in property <bool> compact: false;
+    callback clicked();
+
+    property <bool> primary: variant == "primary";
+    property <color> ink: primary ? Theme.on-accent : Theme.text;
+
+    height: compact ? Theme.control-height-sm : Theme.control-height;
+    border-radius: Theme.radius-md;
+    background: primary ? (ta.has-hover ? Theme.accent-hover : Theme.accent)
+        : variant == "secondary" ? (ta.has-hover || focused ? Theme.surface-4 : Theme.glass)
+        : (ta.has-hover || focused ? Theme.surface-3 : transparent);
+    border-width: variant == "secondary" ? Theme.hairline : 0px;
+    border-color: Theme.border-strong;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.motion-fast; }
+
+    if root.focused: Rectangle {
+        x: -Theme.focus-ring * 2;
+        y: -Theme.focus-ring * 2;
+        width: parent.width + Theme.focus-ring * 4;
+        height: parent.height + Theme.focus-ring * 4;
+        border-radius: Theme.radius-md + Theme.focus-ring * 2;
+        border-width: Theme.focus-ring;
+        border-color: Theme.focus;
+    }
+
+    HorizontalLayout {
+        padding-left: compact ? Theme.space-md : Theme.space-lg;
+        padding-right: compact ? Theme.space-md : Theme.space-lg;
+        spacing: Theme.space-sm;
+        alignment: center;
+        if root.keycap != "": KeyCap {
+            key: root.keycap;
+            inverted: root.primary;
+            y: (parent.height - self.height) / 2;
+        }
+        if root.icon != "": Icon {
+            glyph: root.icon;
+            size: Theme.icon-sm;
+            color: root.ink;
+        }
+        if root.text != "": Text {
+            text: root.text;
+            color: root.ink;
+            font-size: compact ? Theme.font-small : Theme.font-body;
+            font-weight: Theme.weight-semibold;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+    width: 52px * Theme.k;
+    height: self.width;
+    border-radius: self.height / 2;
+    background: ta.has-hover ? Theme.surface-4 : Theme.glass;
+    border-width: Theme.hairline;
+    border-color: active ? Theme.accent : Theme.border;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    Icon {
+        glyph: root.icon;
+        size: Theme.icon-sm;
+        color: root.active ? Theme.accent-fg : Theme.text;
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component NavTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked();
+    height: 56px * Theme.k;
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-item-selected: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        padding-left: Theme.space-md;
+        padding-right: Theme.space-md;
+        Text {
+            text: root.label;
+            font-size: Theme.font-body;
+            font-weight: root.selected ? Theme.weight-semibold : Theme.weight-regular;
+            color: root.selected ? Theme.text : (ta.has-hover ? Theme.text : Theme.text-muted);
+            vertical-alignment: center;
+            animate color { duration: Theme.motion-fast; }
+        }
+    }
+    Rectangle {
+        y: parent.height - self.height;
+        x: (parent.width - self.width) / 2;
+        width: root.selected ? parent.width - Theme.space-md * 2 : 0px;
+        height: 3px * Theme.k;
+        border-radius: self.height / 2;
+        background: Theme.accent;
+        animate width { duration: Theme.motion-normal; easing: ease-out; }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Poster tile. Fixed size: focus lifts and rings the tile instead of resizing it,
+// so neighbouring tiles never shift while navigating.
+export component GameTile inherits Rectangle {
+    in property <string> title;
+    in property <string> launcher;
+    in property <bool> has-poster;
+    in property <image> poster;
+    in property <bool> favorite;
+    in property <bool> focused;
+    callback clicked();
+
+    width: Theme.tile-width;
+    height: Theme.tile-height;
+    accessible-role: button;
+    accessible-label: root.title + ", " + root.launcher;
+    accessible-item-selected: root.focused;
+
+    lift := Rectangle {
+        y: root.focused ? -Theme.tile-lift : 0px;
+        animate y { duration: Theme.motion-normal; easing: ease-out; }
+
+        if root.focused: Rectangle {
+            x: -Theme.focus-ring * 2;
+            y: -Theme.focus-ring * 2;
+            width: parent.width + Theme.focus-ring * 4;
+            height: parent.height + Theme.focus-ring * 4;
+            border-radius: Theme.radius-lg + Theme.focus-ring * 2;
+            border-width: Theme.focus-ring;
+            border-color: Theme.focus;
+            drop-shadow-blur: 28px * Theme.k;
+            drop-shadow-color: Theme.accent-glow;
+        }
+
+        card := Rectangle {
+            border-radius: Theme.radius-lg;
+            background: Theme.surface-2;
+            border-width: Theme.hairline;
+            border-color: Theme.border;
+            clip: true;
+
+            if root.has-poster: Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.poster;
+                image-fit: cover;
+            }
+
+            if !root.has-poster: Rectangle {
+                background: @linear-gradient(160deg, Theme.surface-3 0%, Theme.surface-1 100%);
+                VerticalLayout {
+                    padding: Theme.space-md;
+                    spacing: Theme.space-sm;
+                    alignment: center;
+                    Icon {
+                        glyph: Icons.gamepad;
+                        size: Theme.icon-lg;
+                        color: Theme.text-faint;
+                    }
+                    Text {
+                        text: root.title;
+                        color: Theme.text;
+                        font-family: Theme.family-display;
+                        font-size: Theme.font-body-lg;
+                        font-weight: Theme.weight-semibold;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: root.launcher;
+                        color: Theme.text-muted;
+                        font-size: Theme.font-caption;
+                        letter-spacing: Theme.tracking-wide;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            // Dim unfocused posters slightly so the focused tile reads first.
+            Rectangle {
+                background: Theme.bg;
+                opacity: root.focused ? 0 : 0.18;
+                animate opacity { duration: Theme.motion-normal; }
+            }
+
+            if root.favorite: Rectangle {
+                x: parent.width - self.width - Theme.space-sm;
+                y: Theme.space-sm;
+                width: 36px * Theme.k;
+                height: self.width;
+                border-radius: self.width / 2;
+                background: Theme.glass;
+                Icon {
+                    glyph: Icons.star;
+                    size: Theme.icon-sm;
+                    color: Theme.accent-fg;
+                }
+            }
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One row in Settings. kind: 0 stepper, 1 options, 2 toggle, 3 action, 4 colour swatches.
+export component SettingRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <string> description;
+    in property <bool> focused;
+    in property <int> kind;
+    in property <string> value;
+    in property <float> progress;
+    in property <[string]> options;
+    in property <int> selected-option;
+    in property <bool> on;
+    in property <[color]> swatches;
+    callback adjust(int); // -1 / +1
+    callback choose(int);
+    callback activate();
+    callback pointer-entered();
+
+    min-height: 96px * Theme.k;
+    border-radius: Theme.radius-md;
+    background: focused ? Theme.surface-3 : (row-ta.has-hover ? Theme.surface-2 : transparent);
+    accessible-role: list-item;
+    accessible-label: root.label;
+    accessible-value: root.kind == 2 ? (root.on ? "On" : "Off") : root.value;
+    animate background { duration: Theme.motion-fast; }
+
+    row-ta := TouchArea {
+        mouse-cursor: pointer;
+        changed has-hover => {
+            if self.has-hover { root.pointer-entered(); }
+        }
+        clicked => {
+            if root.kind == 2 || root.kind == 3 { root.activate(); }
+        }
+    }
+
+    // Focus marker: short accent bar on the leading edge.
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 4px * Theme.k;
+        height: root.focused ? parent.height * 0.5 : 0px;
+        border-radius: self.width / 2;
+        background: Theme.accent;
+        animate height { duration: Theme.motion-normal; easing: ease-out; }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.space-lg;
+        padding-right: Theme.space-lg;
+        padding-top: Theme.space-sm;
+        padding-bottom: Theme.space-sm;
+        spacing: Theme.space-lg;
+
+        Icon {
+            glyph: root.icon;
+            size: Theme.icon-md;
+            color: root.focused ? Theme.accent-fg : Theme.text-muted;
+            width: 32px * Theme.kt;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-xxs;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            Text {
+                text: root.label;
+                color: Theme.text;
+                font-size: Theme.font-body;
+                font-weight: Theme.weight-semibold;
+                overflow: elide;
+            }
+            if root.description != "": Text {
+                text: root.description;
+                color: Theme.text-muted;
+                font-size: Theme.font-small;
+                overflow: elide;
+            }
+        }
+
+        // Stepper: < value >
+        if root.kind == 0: HorizontalLayout {
+            spacing: Theme.space-sm;
+            alignment: end;
+            Icon {
+                glyph: Icons.chevron-left;
+                size: Theme.icon-md;
+                color: root.focused ? Theme.text : Theme.text-faint;
+                width: 40px * Theme.k;
+                TouchArea { mouse-cursor: pointer; clicked => { root.adjust(-1); } }
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: Theme.space-xs;
+                width: 150px * Theme.k;
+                Text {
+                    text: root.value;
+                    color: Theme.text;
+                    font-size: Theme.font-body;
+                    font-weight: Theme.weight-semibold;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 4px * Theme.k;
+                    border-radius: self.height / 2;
+                    background: Theme.surface-4;
+                    Rectangle {
+                        x: 0px;
+                        width: parent.width * root.progress;
+                        height: parent.height;
+                        border-radius: parent.border-radius;
+                        background: root.focused ? Theme.accent : Theme.text-faint;
+                        animate width { duration: Theme.motion-normal; easing: ease-out; }
+                    }
+                }
+            }
+            Icon {
+                glyph: Icons.chevron-right;
+                size: Theme.icon-md;
+                color: root.focused ? Theme.text : Theme.text-faint;
+                width: 40px * Theme.k;
+                TouchArea { mouse-cursor: pointer; clicked => { root.adjust(1); } }
+            }
+        }
+
+        // Segmented options
+        if root.kind == 1: HorizontalLayout {
+            spacing: Theme.space-xs;
+            alignment: end;
+            for opt[i] in root.options: Rectangle {
+                property <bool> chosen: i == root.selected-option;
+                height: 48px * Theme.k;
+                y: (parent.height - self.height) / 2;
+                border-radius: Theme.radius-sm;
+                background: chosen ? Theme.accent-subtle : (opt-ta.has-hover ? Theme.surface-4 : transparent);
+                border-width: Theme.hairline;
+                border-color: chosen ? Theme.accent : Theme.border;
+                HorizontalLayout {
+                    padding-left: Theme.space-md;
+                    padding-right: Theme.space-md;
+                    Text {
+                        text: opt;
+                        color: chosen ? Theme.accent-fg : Theme.text-muted;
+                        font-size: Theme.font-small;
+                        font-weight: chosen ? Theme.weight-semibold : Theme.weight-regular;
+                        vertical-alignment: center;
+                    }
+                }
+                opt-ta := TouchArea { mouse-cursor: pointer; clicked => { root.choose(i); } }
+            }
+        }
+
+        // Toggle switch
+        if root.kind == 2: Rectangle {
+            width: 64px * Theme.k;
+            height: 36px * Theme.k;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.height / 2;
+            background: root.on ? Theme.accent : Theme.surface-4;
+            border-width: Theme.hairline;
+            border-color: root.on ? Theme.accent : Theme.border-strong;
+            animate background { duration: Theme.motion-fast; }
+            Rectangle {
+                width: parent.height - 8px * Theme.k;
+                height: self.width;
+                y: 4px * Theme.k;
+                x: root.on ? parent.width - self.width - 4px * Theme.k : 4px * Theme.k;
+                border-radius: self.width / 2;
+                background: root.on ? Theme.on-accent : Theme.text-muted;
+                animate x { duration: Theme.motion-normal; easing: ease-out; }
+            }
+        }
+
+        // Colour swatches (selected one gets a ring and a check)
+        if root.kind == 4: HorizontalLayout {
+            spacing: Theme.space-xs;
+            alignment: end;
+            for c[i] in root.swatches: Rectangle {
+                property <bool> chosen: i == root.selected-option;
+                width: 40px * Theme.k;
+                height: self.width;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.width / 2;
+                border-width: chosen ? 2px * Theme.k : 0px;
+                border-color: Theme.text;
+                accessible-role: radio-button;
+                accessible-checked: chosen;
+                accessible-label: Theme.accent-names[i];
+                Rectangle {
+                    width: parent.width - 10px * Theme.k;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: c;
+                    if chosen: Icon { glyph: Icons.check; size: Theme.icon-sm; color: Theme.on-accent; }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { root.choose(i); } }
+            }
+        }
+
+        // Action: label + chevron
+        if root.kind == 3 && root.value != "": HorizontalLayout {
+            spacing: Theme.space-xs;
+            alignment: end;
+            Text {
+                text: root.value;
+                color: root.focused ? Theme.accent-fg : Theme.text-muted;
+                font-size: Theme.font-small;
+                font-weight: Theme.weight-semibold;
+                vertical-alignment: center;
+            }
+            Icon {
+                glyph: Icons.chevron-right;
+                size: Theme.icon-sm;
+                color: root.focused ? Theme.accent-fg : Theme.text-muted;
+            }
+        }
+    }
+}
+
+export component SectionLabel inherits Text {
+    color: Theme.text-faint;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-semibold;
+    letter-spacing: Theme.tracking-wide;
+}
+
+// Centered dialog surface used by every modal.
+export component Dialog inherits Rectangle {
+    background: Theme.surface-1;
+    border-radius: Theme.radius-xl;
+    border-width: Theme.hairline;
+    border-color: Theme.border;
+    drop-shadow-blur: 48px * Theme.k;
+    drop-shadow-offset-y: 16px * Theme.k;
+    drop-shadow-color: #00000099;
+    clip: true;
+}
+
+export component MenuItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> focused;
+    in property <bool> danger: false;
+    // Short action shown on the right while focused (e.g. "Remove").
+    in property <string> hint;
+    callback clicked();
+    callback pointer-entered();
+    height: 72px * Theme.k;
+    border-radius: Theme.radius-md;
+    background: focused ? Theme.surface-3 : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    animate background { duration: Theme.motion-fast; }
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 4px * Theme.k;
+        height: root.focused ? parent.height * 0.5 : 0px;
+        border-radius: self.width / 2;
+        background: root.danger ? Theme.danger : Theme.accent;
+        animate height { duration: Theme.motion-normal; easing: ease-out; }
+    }
+    HorizontalLayout {
+        padding-left: Theme.space-lg;
+        padding-right: Theme.space-lg;
+        spacing: Theme.space-md;
+        Icon {
+            glyph: root.icon;
+            size: Theme.icon-md;
+            color: root.danger ? Theme.danger : (root.focused ? Theme.accent-fg : Theme.text-muted);
+            width: 32px * Theme.kt;
+        }
+        Text {
+            text: root.label;
+            color: root.danger ? Theme.danger : Theme.text;
+            font-size: Theme.font-body;
+            font-weight: Theme.weight-semibold;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        if root.focused && root.hint != "": Text {
+            text: root.hint;
+            color: root.danger ? Theme.danger : Theme.text-muted;
+            font-size: Theme.font-small;
+            vertical-alignment: center;
+            horizontal-stretch: 0;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        changed has-hover => {
+            if self.has-hover { root.pointer-entered(); }
+        }
+        clicked => { root.clicked(); }
+    }
+}

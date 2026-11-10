@@ -69,6 +69,25 @@ impl GilrsPoller {
     pub fn set_mouse_mode(&mut self, active: bool) {
         self.mouse.set_active(active);
     }
+
+    /// Call instead of `poll_actions` while Kiln isn't the window in front (a game is
+    /// running): drains controller events without acting on them and releases everything
+    /// held, so nothing leaks into the game and nothing fires when Kiln comes back.
+    pub fn suspend(&mut self, now: Instant) {
+        if let Some(ref mut gilrs) = self.gilrs {
+            while gilrs.next_event().is_some() {}
+        }
+        self.chord.set_back_held(false, now);
+        self.chord.set_start_held(false, now);
+        self.stick_x = 0.0;
+        self.stick_y = 0.0;
+        if self.mouse.is_active() {
+            self.mouse.set_left_click(false);
+            self.mouse.set_right_click(false);
+            self.mouse.set_active(false);
+        }
+        self.last_poll = now;
+    }
 }
 
 impl Default for GilrsPoller {
@@ -124,14 +143,14 @@ impl InputPoller for GilrsPoller {
                                 actions.push(NavAction::Options);
                             }
                         }
-                        Button::RightTrigger2 => {
+                        Button::RightTrigger => {
                             if self.mouse.is_active() {
                                 self.mouse.scroll(-120);
                             } else {
                                 actions.push(NavAction::NextTab);
                             }
                         }
-                        Button::LeftTrigger2 => {
+                        Button::LeftTrigger => {
                             if self.mouse.is_active() {
                                 self.mouse.scroll(120);
                             } else {
