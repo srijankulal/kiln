@@ -1,34 +1,123 @@
 name: release
+
+# Continuous delivery:
+#   * Every push to main that passes the `ci` workflow is built and published as a new
+#     release. The version is the latest `0.xxx.xx` tag with the patch bumped
+#     (0.003.04 -> 0.003.05; 0.003.99 -> 0.004.00).
+#   * Pushing a tag by hand (scripts/create-release.sh) still releases that exact tag.
+#   * "Run workflow" in the Actions tab releases the current main with a bumped tag.
 on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
   push:
     tags:
       - '0.*'
       - 'v0.*'
       - 'v*'
+  workflow_dispatch:
+
 permissions:
   contents: write
+
+# Never compute two version numbers at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
+  CARGO_TERM_COLOR: always
   XWIN_ACCEPT_LICENSE: '1'
+
 jobs:
   release:
+    # For CI-triggered runs, only release a successful push build (not PRs or failures).
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_EVENT_NAME" == "push" ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "create_tag=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Skip if this commit is already released.
+          EXISTING="$(git tag --points-at "$SHA" | grep -E '^v?0\.[0-9]{1,3}\.[0-9]{1,2}$' || true)"
+          if [[ -n "$EXISTING" ]]; then
+            echo "Commit $SHA is already tagged ($EXISTING); nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LATEST="$(git tag -l | grep -E '^v?0\.[0-9]{1,3}\.[0-9]{1,2}$' | sed 's/^v//' | sort -t. -k2,2n -k3,3n | tail -n1 || true)"
+          LATEST="${LATEST:-0.000.00}"
+          MINOR=$((10#$(cut -d. -f2 <<< "$LATEST")))
+          PATCH=$((10#$(cut -d. -f3 <<< "$LATEST") + 1))
+          if (( PATCH > 99 )); then MINOR=$((MINOR + 1)); PATCH=0; fi
+          NEXT="$(printf '0.%03d.%02d' "$MINOR" "$PATCH")"
+          echo "Latest tag: $LATEST -> next: $NEXT"
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "create_tag=true" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.version.outputs.skip != 'true'
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip libfontconfig1-dev libfreetype6-dev libudev-dev pkg-config
+        if: steps.version.outputs.skip != 'true'
+      - name: Install system dependencies
+        if: steps.version.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip libfontconfig1-dev libfreetype6-dev libudev-dev libasound2-dev pkg-config
       - uses: taiki-e/install-action@v2
+        if: steps.version.outputs.skip != 'true'
         with:
           tool: cargo-xwin
-      - run: cargo xwin build --release --locked --target x86_64-pc-windows-msvc
-      - run: |
+
+      - name: Build Windows x64
+        if: steps.version.outputs.skip != 'true'
+        run: cargo xwin build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Package
+        if: steps.version.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
           mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/*.exe dist/
           cp -r scripts dist/scripts || true
-          cd dist && zip -r ../kiln-${GITHUB_REF_NAME}-windows-x64.zip . && cd ..
+          (cd dist && zip -r "../kiln-${TAG}-windows-x64.zip" .)
           sha256sum kiln-*.zip > SHA256SUMS.txt
-      - run: gh release create ${GITHUB_REF_NAME} kiln-*.zip SHA256SUMS.txt --title "Kiln ${GITHUB_REF_NAME}" --generate-notes
+
+      - name: Tag commit
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.create_tag == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Publish GitHub release
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" kiln-*.zip SHA256SUMS.txt --title "Kiln $TAG" --generate-notes --verify-tag
