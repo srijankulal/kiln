@@ -4,7 +4,7 @@
 //! module loads them at startup and saves them whenever something changes. Values the UI
 //! doesn't own (the always-keep app list, preferred display) live only here.
 
-use crate::app::{MainWindow, Prompts, Sfx, Theme};
+use crate::app::{Haptics, MainWindow, Prompts, Sfx, Theme};
 use serde::{Deserialize, Serialize};
 use slint::ComponentHandle;
 use std::path::Path;
@@ -29,6 +29,8 @@ pub struct UiSettings {
     /// Interface sound volume, 0.1..=1.0.
     pub sound_volume: f32,
     pub controller_enabled: bool,
+    /// Controller vibration: 0 off, 1 light, 2 strong.
+    pub vibration: i32,
     /// 0 auto, 1 keyboard, 2 controller
     pub prompt_style: i32,
     pub close_launcher_on_exit: bool,
@@ -56,6 +58,7 @@ impl Default for UiSettings {
             sound_enabled: true,
             sound_volume: 0.7,
             controller_enabled: true,
+            vibration: 1,
             prompt_style: 0,
             close_launcher_on_exit: false,
             always_keep: Vec::new(),
@@ -87,6 +90,7 @@ impl UiSettings {
         self.theme_preset = self.theme_preset.clamp(0, THEME_PRESETS - 1);
         self.accent_preset = self.accent_preset.clamp(0, ACCENT_PRESETS - 1);
         self.prompt_style = self.prompt_style.clamp(0, 2);
+        self.vibration = self.vibration.clamp(0, 2);
         self.sound_volume =
             (finite_or(self.sound_volume, 0.7).clamp(0.1, 1.0) * 10.0).round() / 10.0;
         for k in &mut self.always_keep {
@@ -136,6 +140,8 @@ impl UiSettings {
         let prompts = ui.global::<Prompts>();
         prompts.set_controller_enabled(self.controller_enabled);
         prompts.set_style(self.prompt_style);
+        ui.global::<Haptics>().set_level(self.vibration);
+        kiln_input::rumble::set_level(self.vibration);
         ui.set_close_launcher_on_exit(self.close_launcher_on_exit);
         ui.set_kept_apps_count(self.always_keep.len() as i32);
         self.apply_game_folders(ui);
@@ -168,6 +174,7 @@ impl UiSettings {
         self.sound_volume = sfx.get_volume();
         self.controller_enabled = prompts.get_controller_enabled();
         self.prompt_style = prompts.get_style();
+        self.vibration = ui.global::<Haptics>().get_level();
         self.close_launcher_on_exit = ui.get_close_launcher_on_exit();
     }
 }
@@ -201,6 +208,7 @@ mod tests {
             sound_enabled: false,
             sound_volume: 0.4,
             controller_enabled: false,
+            vibration: 2,
             prompt_style: 2,
             close_launcher_on_exit: true,
             always_keep: vec!["code.exe".into(), "slack.exe".into()],
@@ -233,5 +241,6 @@ mod tests {
         assert_eq!(s.preferred_display, "");
         assert_eq!(s.sound_volume, 0.7);
         assert!(s.sound_enabled);
+        assert_eq!(s.vibration, 1);
     }
 }

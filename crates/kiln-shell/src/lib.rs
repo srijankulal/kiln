@@ -2,6 +2,7 @@
 //! Split from the binary so headless snapshot tests can build the UI.
 
 pub mod app;
+pub mod game_watch;
 pub mod image_loader;
 pub mod launch;
 pub mod settings;
@@ -35,6 +36,7 @@ fn step_focus(ui: &MainWindow, current: i32, next: i32, set: impl FnOnce(&MainWi
 
 fn any_overlay_open(ui: &MainWindow) -> bool {
     ui.get_show_game_detail()
+        || ui.get_show_game_launch()
         || ui.get_show_power_menu()
         || ui.get_show_launch()
         || ui.get_show_folders()
@@ -145,6 +147,14 @@ pub fn sync_selected_game(ui: &MainWindow) {
 
 pub fn handle_nav_action(action: NavAction, ui: &MainWindow) {
     if handle_launch_nav(action, ui) || handle_folders_nav(action, ui) {
+        return;
+    }
+    // Game launch screen: B hides it (the game keeps starting); A closes it once it failed.
+    if ui.get_show_game_launch() && action != NavAction::EmergencyAbort {
+        let failed = ui.get_game_launch_phase() == 3;
+        if action == NavAction::Back || (failed && action == NavAction::Select) {
+            ui.set_show_game_launch(false);
+        }
         return;
     }
     if ui.get_show_boot() && action != NavAction::EmergencyAbort {

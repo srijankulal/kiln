@@ -93,6 +93,8 @@ kiln-scan --verbose
 | **LB / RB (Triggers)** | Switch category filter tabs (All, Recent, Favorites, Steam, Epic, Other, Settings) |
 | **Guide / Mode Button** | Toggle Gamepad-as-Mouse mode |
 | **Back + Start (Hold 5s)** | **Emergency Abort:** Instantly restore desktop and exit |
+| **L3 + R3 (both sticks in, hold 1s, in a game or launcher)** | Bring Kiln back to the front |
+| **Left stick / Ⓐ / Ⓑ over Steam or Epic** | Mouse pointer turns on automatically: move, click, right-click (Guide toggles it) |
 | **Ctrl + Alt + Shift + G** | Global keyboard emergency toggle |
 
 ---

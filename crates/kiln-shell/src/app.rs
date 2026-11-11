@@ -1,5 +1,6 @@
 //! Application controller and state management for Kiln Shell.
 
+use crate::game_watch::WatchRequest;
 use crate::image_loader::load_image_off_thread;
 use anyhow::Result;
 #[cfg(windows)]
@@ -14,6 +15,9 @@ use kiln_library::scanners::epic::EpicScanner;
 use kiln_library::scanners::standalone::StandaloneScanner;
 use kiln_library::scanners::steam::SteamScanner;
 use kiln_library::scanners::GameScanner;
+#[cfg(windows)]
+use kiln_sysctl::launchers;
+use kiln_sysctl::launchers::Launcher;
 use slint::{Image, SharedString};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -271,8 +275,22 @@ impl ShellApp {
         Ok(self.db.toggle_favorite(id)?)
     }
 
-    /// Launches a game by ID or simulates in dry-run mode.
-    pub fn play_game(&self, id: &str) -> Result<()> {
+    /// Store launchers that have games in the library (started quietly ahead of time).
+    pub fn launchers_in_library(&self) -> Vec<Launcher> {
+        let games = self.db.list_games().unwrap_or_default();
+        [
+            (GameSource::Steam, Launcher::Steam),
+            (GameSource::Epic, Launcher::Epic),
+        ]
+        .into_iter()
+        .filter(|(src, _)| games.iter().any(|g| &g.source == src))
+        .map(|(_, l)| l)
+        .collect()
+    }
+
+    /// Launches a game by ID (or simulates it in dry-run mode). Returns what the game
+    /// watcher needs to track the session, when it can be tracked.
+    pub fn play_game(&self, id: &str) -> Result<Option<WatchRequest>> {
         let game = self
             .db
             .get_game(id)?
@@ -283,18 +301,30 @@ impl ShellApp {
             .unwrap_or_default()
             .as_secs();
 
-        // Update last played timestamp in database
-        self.db.update_playtime(id, 60, now)?;
+        // Last played = now. Play time itself is added by the game watcher when the game
+        // closes (see game_watch.rs).
+        self.db.update_playtime(id, 0, now)?;
 
         if self.dry_run {
             println!(
-                "[DRY-RUN] Simulating game launch:\n  Title: {}\n  Source: {:?}\n  Kind: {:?}\n  Target: {}\n  Install Dir: {}",
+                "[DRY-RUN] Simulating game launch:
+  Title: {}
+  Source: {:?}
+  Kind: {:?}
+  Target: {}
+  Install Dir: {}",
                 game.title, game.source, game.launch_kind, game.launch_target, game.install_dir
             );
-            return Ok(());
+            return Ok(None);
         }
 
         println!("Launching game: {} ({})", game.title, game.launch_target);
+
+        let launcher = match game.source {
+            GameSource::Steam => Some(Launcher::Steam),
+            GameSource::Epic => Some(Launcher::Epic),
+            _ => None,
+        };
 
         // Real execution
         #[cfg(windows)]
@@ -315,12 +345,21 @@ impl ShellApp {
                             .spawn()?;
                     }
                 }
-                LaunchKind::Uri => {
-                    // Launch URI on Windows via rundll32 or explorer
-                    std::process::Command::new("cmd")
-                        .args(["/c", "start", "", &game.launch_target])
-                        .spawn()?;
-                }
+                LaunchKind::Uri => match launcher {
+                    // Steam not running: start it with -silent and the game URL in one go,
+                    // so the game opens without the whole Steam window.
+                    Some(Launcher::Steam)
+                        if Launcher::Steam
+                            .start_silent(Some(&game.launch_target))
+                            .unwrap_or(false) => {}
+                    Some(Launcher::Epic) => {
+                        // Start Epic in the background first (it ignores "silent" on a
+                        // cold start), then hand it the game.
+                        let _ = Launcher::Epic.start_silent(None);
+                        launchers::open_uri(&game.launch_target)?;
+                    }
+                    _ => launchers::open_uri(&game.launch_target)?,
+                },
                 LaunchKind::Custom => {
                     std::process::Command::new(&game.launch_target).spawn()?;
                 }
@@ -335,7 +374,13 @@ impl ShellApp {
             );
         }
 
-        Ok(())
+        let req = WatchRequest {
+            game_id: game.id.clone(),
+            title: game.title.clone(),
+            install_dir: game.install_dir.clone(),
+            launcher,
+        };
+        Ok(req.is_trackable().then_some(req))
     }
 
     /// Scans Steam, Epic and the game folders, then updates the library. Games from game

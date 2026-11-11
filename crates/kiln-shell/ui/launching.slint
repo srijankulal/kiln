@@ -1,0 +1,213 @@
+// Game launch screen: shown from the moment Play is pressed until the game is up.
+// The focused tile's poster lifts out of the shelf and grows to the centre while the
+// library dims and the game's hero art fades in behind it; a status line and a sweeping bar
+// show progress (the store launcher can take a while). When the game appears the poster
+// pushes forward and the screen fades away; if it never starts, the bar turns red.
+import { Theme } from "theme.slint";
+import { Icons } from "icons.slint";
+import { Icon, Hint } from "components.slint";
+
+export component GameLaunchScreen inherits Rectangle {
+    in property <string> title;
+    in property <string> launcher;
+    in property <bool> has-poster;
+    in property <image> poster;
+    in property <bool> has-hero;
+    in property <image> hero;
+    // Where the tile was on screen (the poster starts there).
+    in property <length> from-x;
+    in property <length> from-y;
+    in property <length> from-w;
+    in property <length> from-h;
+    // 0 starting, 1 the launcher needs the user, 2 game is up (leaving), 3 didn't start.
+    in property <int> phase;
+    in property <string> status;
+    callback close();
+
+    property <bool> entered: false;
+    property <bool> leaving: root.phase == 2;
+    property <bool> failed: root.phase == 3;
+    property <bool> anim: Theme.animations;
+
+    // Poster target: centred, a little above the middle.
+    property <length> to-h: min(root.height * 0.46, root.width * 0.24 * 1.5);
+    property <length> to-w: self.to-h / 1.5;
+    property <length> to-x: (root.width - self.to-w) / 2;
+    property <length> to-y: root.height * 0.38 - self.to-h / 2;
+
+    property <float> breath: anim ? 0.5 + 0.5 * sin(animation-tick() / 1ms * 0.14deg) : 1;
+    property <float> sweep: anim ? 0.5 + 0.5 * sin(animation-tick() / 1ms * 0.22deg) : 0;
+    property <color> bar-color: root.failed ? Theme.danger : root.phase == 1 ? Theme.warning : Theme.accent;
+
+    // Flip `entered` one frame after creation so every property below animates in.
+    Timer {
+        interval: 16ms;
+        running: !root.entered;
+        triggered => { root.entered = true; }
+    }
+
+    opacity: root.leaving ? 0 : 1;
+    animate opacity { delay: anim ? 220ms : 0ms; duration: anim ? 480ms : 0ms; easing: ease-in; }
+
+    // Swallow pointer input; a click once it failed closes it.
+    TouchArea { clicked => { if root.failed { root.close(); } } }
+
+    // Dim the library.
+    Rectangle {
+        background: Theme.bg;
+        opacity: root.entered ? 1 : 0;
+        animate opacity { duration: anim ? 420ms : 0ms; easing: ease-out; }
+    }
+
+    // Hero art, faint, drifting slowly in.
+    if root.has-hero: Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.hero;
+        image-fit: cover;
+        opacity: root.entered ? 0.28 : 0;
+        transform-scale: root.entered ? 104% : 112%;
+        animate opacity { delay: anim ? 120ms : 0ms; duration: anim ? 900ms : 0ms; easing: ease-out; }
+        animate transform-scale { duration: anim ? 2400ms : 0ms; easing: ease-out; }
+    }
+    // Vignette so text stays readable over the art.
+    Rectangle {
+        background: @linear-gradient(180deg, Theme.bg.transparentize(0.75) 0%, Theme.bg.transparentize(0.35) 55%, Theme.bg 100%);
+        opacity: root.entered ? 1 : 0;
+        animate opacity { duration: anim ? 600ms : 0ms; }
+    }
+
+    // Accent glow behind the poster, breathing while we wait.
+    Rectangle {
+        width: root.to-h * 2.2;
+        height: self.width;
+        x: root.to-x + root.to-w / 2 - self.width / 2;
+        y: root.to-y + root.to-h / 2 - self.height / 2;
+        background: @radial-gradient(circle, root.bar-color.transparentize(0.8) 0%, root.bar-color.transparentize(1) 68%);
+        opacity: !root.entered ? 0 : root.failed ? 0.6 : 0.5 + 0.5 * root.breath;
+        animate opacity { duration: anim ? 700ms : 0ms; easing: ease-out; }
+    }
+
+    // The poster: flies from the tile to the centre.
+    card := Rectangle {
+        x: root.entered ? root.to-x : root.from-x;
+        y: root.entered ? root.to-y : root.from-y;
+        width: root.entered ? root.to-w : root.from-w;
+        height: root.entered ? root.to-h : root.from-h;
+        border-radius: Theme.radius-xl;
+        background: Theme.surface-2;
+        border-width: Theme.hairline;
+        border-color: Theme.border-strong;
+        clip: true;
+        drop-shadow-blur: 60px * Theme.k;
+        drop-shadow-color: #000000A0;
+        transform-scale: root.leaving ? 118% : 100%;
+        animate x, y, width, height {
+            duration: anim ? 560ms : 0ms;
+            easing: cubic-bezier(0.22, 1.25, 0.36, 1);
+        }
+        animate transform-scale { duration: anim ? 700ms : 0ms; easing: ease-in; }
+
+        if root.has-poster: Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.poster;
+            image-fit: cover;
+        }
+        if !root.has-poster: Rectangle {
+            background: @linear-gradient(160deg, Theme.surface-3 0%, Theme.surface-1 100%);
+            Icon { glyph: Icons.gamepad; size: Theme.icon-lg; color: Theme.text-faint; }
+        }
+
+        // Light sweep across the poster while loading.
+        if !root.failed: Rectangle {
+            width: parent.width * 0.5;
+            x: -self.width + (parent.width + self.width) * root.sweep;
+            background: @linear-gradient(90deg, #FFFFFF00 0%, #FFFFFF14 50%, #FFFFFF00 100%);
+        }
+    }
+
+    // Title, status and progress below the poster.
+    VerticalLayout {
+        x: 0px;
+        y: root.to-y + root.to-h + Theme.space-xl;
+        width: root.width;
+        spacing: Theme.space-sm;
+        alignment: start;
+        opacity: root.entered ? 1 : 0;
+        animate opacity { delay: anim ? 260ms : 0ms; duration: anim ? 420ms : 0ms; easing: ease-out; }
+
+        Text {
+            text: root.launcher;
+            horizontal-alignment: center;
+            color: Theme.accent-fg;
+            font-size: Theme.font-small;
+            font-weight: Theme.weight-semibold;
+            letter-spacing: Theme.tracking-wide;
+        }
+        Text {
+            text: root.title;
+            horizontal-alignment: center;
+            color: Theme.text;
+            font-family: Theme.family-display;
+            font-size: Theme.font-headline;
+            font-weight: Theme.weight-semibold;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            alignment: center;
+            padding-left: Theme.margin-x;
+            padding-right: Theme.margin-x;
+            Text {
+                text: root.status;
+                horizontal-alignment: center;
+                color: root.failed ? Theme.danger : Theme.text-muted;
+                font-size: Theme.font-body;
+                wrap: word-wrap;
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            padding-top: Theme.space-xs;
+            track := Rectangle {
+                width: 320px * Theme.k;
+                height: 4px * Theme.k;
+                border-radius: self.height / 2;
+                background: Theme.surface-3;
+                clip: true;
+                Rectangle {
+                    property <length> seg: track.width * 0.32;
+                    width: root.failed || root.leaving ? track.width : self.seg;
+                    x: root.failed || root.leaving ? 0px : (track.width - self.seg) * root.sweep;
+                    height: parent.height;
+                    border-radius: self.height / 2;
+                    background: root.bar-color;
+                    animate width { duration: anim ? 400ms : 0ms; easing: ease-out; }
+                    animate background { duration: anim ? 300ms : 0ms; }
+                }
+            }
+        }
+    }
+
+    // Footer: how to get around while a game runs.
+    HorizontalLayout {
+        x: 0px;
+        y: root.height - Theme.margin-y - self.height;
+        width: root.width;
+        height: 40px * Theme.kt;
+        padding-left: Theme.margin-x;
+        padding-right: Theme.margin-x;
+        spacing: Theme.space-lg;
+        opacity: root.entered ? 1 : 0;
+        animate opacity { delay: anim ? 400ms : 0ms; duration: anim ? 400ms : 0ms; }
+
+        Text {
+            text: "In a game, hold both sticks in (L3 + R3) to come back to Kiln";
+            color: Theme.text-faint;
+            font-size: Theme.font-small;
+            vertical-alignment: center;
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Hint { key: "B"; label: root.failed ? "Close" : "Hide"; }
+    }
+}

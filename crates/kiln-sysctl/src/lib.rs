@@ -3,6 +3,8 @@
 pub mod audio;
 pub mod dialogs;
 pub mod display;
+pub mod focus;
+pub mod launchers;
 pub mod monitors;
 pub mod optimizer;
 pub mod power;

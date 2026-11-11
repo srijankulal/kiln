@@ -60,6 +60,37 @@ pub fn this_process_is_foreground() -> bool {
     }
 }
 
+/// The current local time as Windows shows it (the user's time zone and regional format,
+/// e.g. "3:42 PM" or "15:42"), without seconds.
+pub fn local_clock() -> String {
+    #[cfg(windows)]
+    {
+        use windows::core::PCWSTR;
+        use windows::Win32::Globalization::{GetTimeFormatEx, TIME_NOSECONDS};
+        let mut buf = [0u16; 64];
+        // SAFETY: null locale = user default, no explicit time = now, null format = the
+        // locale's; the output buffer is a valid slice.
+        let n = unsafe {
+            GetTimeFormatEx(
+                PCWSTR::null(),
+                TIME_NOSECONDS,
+                None,
+                PCWSTR::null(),
+                Some(&mut buf),
+            )
+        };
+        if n > 1 {
+            return String::from_utf16_lossy(&buf[..(n - 1) as usize]);
+        }
+    }
+    // Fallback (no Windows, or the call failed): UTC, 24-hour.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{:02}:{:02}", (now / 3600) % 24, (now / 60) % 60)
+}
+
 /// Performs a power action. With `dry_run` it only reports what it would do.
 pub fn perform(action: PowerAction, dry_run: bool) -> Result<(), PowerError> {
     if dry_run {

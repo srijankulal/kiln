@@ -9,3 +9,12 @@ export global Sfx {
     // `variant` picks the pitch for position-based cues (focus index, tab index, direction).
     callback play(string, int);
 }
+
+// Controller vibration (src/main.rs plays it, kiln-input/src/rumble.rs has the patterns).
+// Follows the same cues as the sounds, but only a few of them, and only when the
+// controller is the active input.
+export global Haptics {
+    in-out property <int> level: 1; // 0 off, 1 light, 2 strong
+    // Plays a sample at the current level (when the setting changes).
+    callback preview();
+}

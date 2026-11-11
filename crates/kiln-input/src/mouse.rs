@@ -63,6 +63,13 @@ impl Win32MouseDriver {
 }
 
 #[cfg(windows)]
+impl Default for Win32MouseDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(windows)]
 impl MouseDriver for Win32MouseDriver {
     fn execute(&mut self, action: MouseAction) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{

@@ -118,7 +118,7 @@ fn screenshots() {
         println!("wrote {}", path.display());
     };
 
-    ui.set_clock_time("19:42".into());
+    ui.set_clock_time("12:42 PM".into());
     let theme = ui.global::<Theme>();
 
     // ---------------------------------------------------------------- startup screen
@@ -208,6 +208,47 @@ fn screenshots() {
     shoot("detail", 1920, 1080);
     ui.set_show_game_detail(false);
 
+    // Game launch screen: poster mid-flight, settled, launcher needs the user, failed.
+    // Uses a game with artwork when there is one.
+    {
+        use slint::Model;
+        let games = ui.get_games();
+        let pick = (0..games.row_count())
+            .find(|&i| {
+                games
+                    .row_data(i)
+                    .is_some_and(|g| g.has_poster && g.has_hero)
+            })
+            .or_else(|| {
+                (0..games.row_count()).find(|&i| games.row_data(i).is_some_and(|g| g.has_poster))
+            })
+            .unwrap_or(0);
+        ui.set_focused_card_index(pick as i32);
+        sync_selected_game(&ui);
+    }
+    shoot("launch-before", 1920, 1080);
+    ui.set_game_launch(ui.get_selected_game());
+    ui.set_game_launch_phase(0);
+    ui.set_game_launch_status("Starting through Steam…".into());
+    ui.set_show_game_launch(true);
+    shoot("launch-flight", 1920, 1080);
+    shoot("launch-mid", 1920, 1080);
+    shoot("launch-loading", 1920, 1080);
+    shoot("launch-loading-settled", 1920, 1080);
+    ui.set_game_launch_phase(1);
+    ui.set_game_launch_status(
+        "Epic Games needs you before the game can start. Finish there: the stick moves the mouse and A clicks."
+            .into(),
+    );
+    shoot("launch-epic", 1920, 1080);
+    ui.set_game_launch_phase(3);
+    ui.set_game_launch_status(
+        "The game didn't start. Check Steam or Epic Games, then try again.".into(),
+    );
+    shoot("launch-failed", 1920, 1080);
+    shoot("launch-failed-720p", 1280, 720);
+    ui.set_show_game_launch(false);
+
     ui.set_show_power_menu(true);
     ui.set_power_focus(0);
     shoot("power", 1920, 1080);
@@ -222,7 +263,9 @@ fn screenshots() {
     shoot("settings", 1920, 1080);
     ui.set_settings_focus(9);
     shoot("settings-sound", 1920, 1080);
-    ui.set_settings_focus(15);
+    ui.set_settings_focus(12);
+    shoot("settings-vibration", 1920, 1080);
+    ui.set_settings_focus(16);
     shoot("settings-scrolled", 1920, 1080);
     ui.set_game_folders(ModelRc::new(VecModel::from(vec![
         slint::SharedString::from(r"D:\Games"),

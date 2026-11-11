@@ -5,13 +5,15 @@
 //! Kiln shell: Fullscreen 10-foot TV UI binary.
 
 use clap::Parser;
-use kiln_input::{GilrsPoller, InputPoller, NavAction};
+use kiln_input::{rumble, GilrsPoller, InputPoller, NavAction};
 use kiln_library::db::LibraryDatabase;
-use kiln_shell::app::{LaunchApp, MainWindow, Prompts, Sfx, ShellApp};
+use kiln_shell::app::{Haptics, LaunchApp, MainWindow, Prompts, Sfx, ShellApp};
+use kiln_shell::game_watch;
 use kiln_shell::launch::{self, DisplayTarget};
 use kiln_shell::settings::UiSettings;
 use kiln_shell::sound::{Cue, SoundEngine};
 use kiln_shell::{handle_nav_action, sfx, sync_selected_game};
+use kiln_sysctl::launchers::Launcher;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,7 +21,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 /// The loading screen's bar fills no earlier than this, in time with the startup chime's
 /// final chord (see `render_boot` in sound.rs).
@@ -33,6 +35,16 @@ const EXIT_SOUND_DELAY: Duration = Duration::from_millis(260);
 /// After switching to the chosen screen / full screen, wait for the window to settle before
 /// the loading animation and chime start, so the resize never cuts into the animation.
 const BOOT_SETTLE: Duration = Duration::from_millis(380);
+
+/// Which kind of window is in front, for the controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Front {
+    Kiln,
+    /// Steam / Epic: the controller can drive the mouse there.
+    Launcher,
+    /// A game or anything else: the controller is left alone.
+    Other,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -79,14 +91,9 @@ fn get_app_dir() -> PathBuf {
     p
 }
 
+/// Clock text: local time in the user's Windows format (the system clock is UTC).
 fn get_current_time_str() -> String {
-    let now = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let hours = (now / 3600) % 24;
-    let mins = (now / 60) % 60;
-    format!("{:02}:{:02}", hours, mins)
+    kiln_sysctl::session::local_clock()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -150,7 +157,19 @@ fn main() -> anyhow::Result<()> {
         ui.global::<Sfx>().on_play(move |name, variant| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let g = ui.global::<Sfx>();
-            if !g.get_ready() || !g.get_enabled() {
+            if !g.get_ready() {
+                return;
+            }
+            // Vibration rides on a few of the same cues, only while the controller is the
+            // active input (and independent of the sound setting).
+            let prompts = ui.global::<Prompts>();
+            if prompts.get_controller_enabled() && prompts.get_last_input_controller() {
+                if let Some(p) = rumble::Pattern::for_cue(&name) {
+                    rumble::set_level(ui.global::<Haptics>().get_level());
+                    rumble::play(p);
+                }
+            }
+            if !g.get_enabled() {
                 return;
             }
             if let Some(cue) = Cue::from_name(&name, variant) {
@@ -158,6 +177,16 @@ fn main() -> anyhow::Result<()> {
             }
         });
     }
+
+    // Vibration setting changed: play a sample at the new level.
+    ui.global::<Haptics>().on_preview({
+        let ui_weak = ui.as_weak();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            rumble::set_level(ui.global::<Haptics>().get_level());
+            rumble::play(rumble::Pattern::Confirm);
+        }
+    });
 
     // Library: rescan on every launch so new installs and game-folder changes show up.
     app.set_game_folders(&settings.borrow().game_folders);
@@ -216,20 +245,58 @@ fn main() -> anyhow::Result<()> {
     // Callbacks
     let app_play = app.clone();
     let ui_weak_play = ui.as_weak();
+    let watching: game_watch::Watching = Default::default();
+    let db_path_play = db_path.clone();
+    let play_safe = app.is_safe_mode();
     ui.on_play_game(move |id| {
-        let ui = ui_weak_play.upgrade();
+        let Some(ui) = ui_weak_play.upgrade() else {
+            return;
+        };
+        // Launch screen first, so something happens the moment Play is pressed.
+        let item = ui.get_selected_game();
+        if item.id == id {
+            ui.set_game_launch(item.clone());
+            ui.set_game_launch_phase(0);
+            ui.set_game_launch_status(SharedString::from(game_watch::starting_text(
+                item.launcher.as_str(),
+            )));
+            ui.set_show_game_launch(true);
+        }
         match app_play.play_game(id.as_str()) {
-            Ok(()) => {
-                if let Some(ui) = &ui {
-                    sfx(ui, "launch", 0);
+            Ok(req) => {
+                sfx(&ui, "launch", 0);
+                // Track the session: real play time, launcher windows handled, Kiln back
+                // in front when the game closes.
+                if let Some(req) = req {
+                    let weak = ui_weak_play.clone();
+                    let raise_weak = ui_weak_play.clone();
+                    let raise = move || raise_kiln(raise_weak.clone(), play_safe);
+                    let report = move |ev: game_watch::WatchEvent| {
+                        let weak = weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = weak.upgrade() {
+                                show_watch_event(&ui, &ev);
+                            }
+                        });
+                    };
+                    game_watch::spawn(req, db_path_play.clone(), watching.clone(), raise, report);
+                } else {
+                    // Not tracked (dry run, or no install folder): show the launch screen
+                    // briefly, then fade it out.
+                    let weak = ui.as_weak();
+                    slint::Timer::single_shot(Duration::from_millis(3000), move || {
+                        if let Some(ui) = weak.upgrade() {
+                            finish_launch_screen(&ui);
+                        }
+                    });
                 }
             }
             Err(e) => {
                 eprintln!("Failed to play game: {}", e);
-                if let Some(ui) = &ui {
-                    sfx(ui, "error", 0);
-                    ui.set_status_message(SharedString::from("Couldn't start that game"));
-                }
+                sfx(&ui, "error", 0);
+                ui.set_game_launch_phase(3);
+                ui.set_game_launch_status(SharedString::from("Kiln couldn't start this game."));
+                ui.set_status_message(SharedString::from("Couldn't start that game"));
             }
         }
     });
@@ -526,7 +593,9 @@ fn main() -> anyhow::Result<()> {
         let launch_rows = launch_rows.clone();
         let is_safe = app.is_safe_mode();
         let is_dry = app.is_dry_run();
+        let app_launch = app.clone();
         ui.on_launch_start(move || {
+            let launchers = app_launch.launchers_in_library();
             let Some(ui) = ui_weak.upgrade() else { return };
             let rows: Vec<LaunchApp> = launch_rows.iter().collect();
             let to_close: Vec<String> = rows
@@ -602,6 +671,20 @@ fn main() -> anyhow::Result<()> {
                     };
                     let summary = launch::summarize(&report, is_dry);
                     println!("Startup: {}", summary);
+
+                    // Start Steam / Epic quietly now, so they're signed in and ready by the
+                    // time a game is picked (no sign-in wait or launcher window on Play).
+                    for l in launchers {
+                        if is_dry {
+                            println!("[DRY-RUN] Would start {} in the background", l.name());
+                            continue;
+                        }
+                        match l.start_silent(None) {
+                            Ok(true) => println!("Started {} in the background", l.name()),
+                            Ok(false) => {}
+                            Err(e) => println!("Didn't start {}: {e}", l.name()),
+                        }
+                    }
 
                     let _ = slint::invoke_from_event_loop(move || {
                         let wait = BOOT_MIN.saturating_sub(started.elapsed());
@@ -716,15 +799,46 @@ fn main() -> anyhow::Result<()> {
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
+    let poll_safe = app.is_safe_mode();
     let poller_thread = std::thread::spawn(move || {
         let mut poller = GilrsPoller::new();
+        let self_pid = std::process::id();
+        let mut front = Front::Kiln;
+        // Foreground lookups are cached per PID (the exe of a PID doesn't change).
+        let mut fg_cache: Option<(u32, Front)> = None;
         while r.load(Ordering::Relaxed) {
             let now = std::time::Instant::now();
-            // While a game (or any other window) is in front, Kiln ignores the controller
-            // entirely, including mouse mode and the exit chord.
-            if !kiln_sysctl::session::this_process_is_foreground() {
+            let now_front = match kiln_sysctl::focus::foreground_pid() {
+                Some(pid) if pid == self_pid => Front::Kiln,
+                Some(pid) => match fg_cache {
+                    Some((p, f)) if p == pid => f,
+                    _ => {
+                        let f = match kiln_sysctl::focus::foreground_exe() {
+                            Some((_, exe)) if Launcher::from_exe(&exe).is_some() => Front::Launcher,
+                            _ => Front::Other,
+                        };
+                        fg_cache = Some((pid, f));
+                        f
+                    }
+                },
+                None => Front::Other,
+            };
+            if now_front != front {
+                // Release everything held so nothing carries over between windows.
                 poller.suspend(now);
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                front = now_front;
+            }
+            if front != Front::Kiln {
+                // A game or launcher is in front: Kiln ignores the controller, except for
+                // "hold both sticks in" to come back, and the stick-as-mouse over a launcher
+                // (Steam / Epic sign-in, prompts) so no keyboard or mouse is needed.
+                if poller.poll_away(now, front == Front::Launcher) {
+                    println!("Controller: returning to Kiln");
+                    rumble::play(rumble::Pattern::Return);
+                    raise_kiln(ui_weak_poll.clone(), poll_safe);
+                    poller.suspend(now);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(16));
                 continue;
             }
             let actions = poller.poll_actions(now);
@@ -770,6 +884,75 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Updates the launch screen and footer for a game watcher event (UI thread).
+fn show_watch_event(ui: &MainWindow, ev: &game_watch::WatchEvent) {
+    use game_watch::WatchEvent;
+    ui.set_status_message(SharedString::from(game_watch::status_text(ev)));
+    let launching = ui.get_show_game_launch();
+    match ev {
+        WatchEvent::Starting { .. } => {}
+        WatchEvent::LauncherNeedsYou { .. } | WatchEvent::NotStarted { .. } => {
+            if launching {
+                let failed = matches!(ev, WatchEvent::NotStarted { .. });
+                ui.set_game_launch_phase(if failed { 3 } else { 1 });
+                ui.set_game_launch_status(SharedString::from(game_watch::launch_screen_text(ev)));
+                if failed {
+                    sfx(ui, "error", 0);
+                }
+            }
+        }
+        WatchEvent::Playing { .. } => {
+            if launching {
+                finish_launch_screen(ui);
+            }
+        }
+        WatchEvent::Ended { .. } => {
+            ui.set_show_game_launch(false);
+            // Reload the view so the new play time shows.
+            ui.invoke_change_tab(ui.get_selected_tab());
+        }
+    }
+}
+
+/// Game is up: the launch screen plays its exit (poster pushes forward, fades), then goes.
+fn finish_launch_screen(ui: &MainWindow) {
+    if !ui.get_show_game_launch() || ui.get_game_launch_phase() >= 2 {
+        return;
+    }
+    ui.set_game_launch_phase(2);
+    ui.set_game_launch_status(SharedString::from("Have fun!"));
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(760), move || {
+        if let Some(ui) = weak.upgrade() {
+            if ui.get_game_launch_phase() == 2 {
+                ui.set_show_game_launch(false);
+            }
+        }
+    });
+}
+
+/// Brings Kiln back in front (callable from any thread). If Windows minimized Kiln or
+/// dropped it back to its normal window size while a game or launcher was in front, Kiln
+/// goes full screen again (not on the startup screen, which is meant to be windowed).
+fn raise_kiln(weak: slint::Weak<MainWindow>, is_safe: bool) {
+    let pid = std::process::id();
+    let needs_fix = !is_safe && kiln_sysctl::focus::process_window_needs_fullscreen(pid);
+    kiln_sysctl::focus::bring_process_to_front(pid);
+    if needs_fix {
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_show_launch() {
+                return;
+            }
+            println!("Restoring full screen");
+            let w = ui.window();
+            w.set_minimized(false);
+            w.set_fullscreen(false);
+            w.set_fullscreen(true);
+        });
+    }
+}
+
 /// Moves Kiln to the chosen screen, then goes full screen there. This only places Kiln's
 /// own window; Windows display settings are untouched.
 fn place_window(ui: &MainWindow, m: &kiln_sysctl::monitors::MonitorInfo, is_safe: bool) {
@@ -803,7 +986,8 @@ mod tests {
     #[test]
     fn test_clock_format() {
         let time_str = get_current_time_str();
-        assert_eq!(time_str.len(), 5);
-        assert!(time_str.contains(':'));
+        // "15:42", "3:42 PM", "03:42 PM"...
+        assert!((4..=12).contains(&time_str.chars().count()), "{time_str}");
+        assert!(time_str.chars().any(|c| c.is_ascii_digit()));
     }
 }

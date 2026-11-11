@@ -5,6 +5,7 @@ pub mod deadzone;
 pub mod mouse;
 pub mod osk;
 pub mod poller;
+pub mod rumble;
 
 pub use chord::{ChordDetector, ChordEvent};
 pub use deadzone::{AnalogConfig, AnalogProcessor};

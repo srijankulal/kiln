@@ -8,7 +8,11 @@ use crate::mouse::FakeMouseDriver;
 use crate::mouse::Win32MouseDriver;
 use crate::mouse::{MouseController, MouseDriver};
 use crate::NavAction;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Hold both sticks in (L3 + R3) this long while a game or launcher is in front to return
+/// to Kiln. Not Back + Start: Windows (Game Bar) and Steam already react to that.
+pub const RETURN_HOLD: Duration = Duration::from_millis(1000);
 
 pub trait InputPoller {
     fn poll_actions(&mut self, now: Instant) -> Vec<NavAction>;
@@ -22,6 +26,12 @@ pub struct GilrsPoller {
     stick_y: f32,
     mouse: MouseController<Box<dyn MouseDriver>>,
     last_poll: Instant,
+    /// L3 + R3 (short hold) while Kiln is in the background: bring Kiln back.
+    return_chord: ChordDetector,
+    /// Pointer mode is on for the window in front (a launcher), see `poll_away`.
+    away_pointer: bool,
+    /// Vibration pattern playing (dropping it stops it).
+    rumble: Option<gilrs::ff::Effect>,
 }
 
 impl GilrsPoller {
@@ -41,6 +51,9 @@ impl GilrsPoller {
             stick_y: 0.0,
             mouse: MouseController::new(driver),
             last_poll: now,
+            return_chord: ChordDetector::new(RETURN_HOLD),
+            away_pointer: false,
+            rumble: None,
         }
     }
 
@@ -55,6 +68,9 @@ impl GilrsPoller {
             stick_y: 0.0,
             mouse: MouseController::new(driver),
             last_poll: now,
+            return_chord: ChordDetector::new(RETURN_HOLD),
+            away_pointer: false,
+            rumble: None,
         }
     }
 
@@ -70,6 +86,16 @@ impl GilrsPoller {
         self.mouse.set_active(active);
     }
 
+    /// Starts a requested vibration pattern (see `rumble::play`). Called on every poll.
+    fn service_rumble(&mut self) {
+        if let Some(pattern) = crate::rumble::take_pending() {
+            if let Some(ref mut gilrs) = self.gilrs {
+                // Replaces (and so stops) the previous pattern.
+                self.rumble = crate::rumble::start_effect(gilrs, pattern);
+            }
+        }
+    }
+
     /// Call instead of `poll_actions` while Kiln isn't the window in front (a game is
     /// running): drains controller events without acting on them and releases everything
     /// held, so nothing leaks into the game and nothing fires when Kiln comes back.
@@ -79,6 +105,9 @@ impl GilrsPoller {
         }
         self.chord.set_back_held(false, now);
         self.chord.set_start_held(false, now);
+        self.return_chord.set_back_held(false, now);
+        self.return_chord.set_start_held(false, now);
+        self.away_pointer = false;
         self.stick_x = 0.0;
         self.stick_y = 0.0;
         if self.mouse.is_active() {
@@ -87,6 +116,78 @@ impl GilrsPoller {
             self.mouse.set_active(false);
         }
         self.last_poll = now;
+    }
+
+    /// Call instead of `poll_actions` while another window is in front. Only two things
+    /// work, so nothing else leaks into a game:
+    /// - holding both sticks in (L3 + R3) for `RETURN_HOLD` returns `true` (bring Kiln back);
+    /// - with `pointer` (a launcher such as Steam or Epic is in front, not a game), the
+    ///   controller drives the mouse: left stick moves, A clicks, B right-clicks, triggers
+    ///   scroll, Guide turns the pointer off / on.
+    ///
+    /// Call `suspend` whenever the kind of window in front changes.
+    pub fn poll_away(&mut self, now: Instant, pointer: bool) -> bool {
+        self.service_rumble();
+        let dt = now.duration_since(self.last_poll).as_secs_f32();
+        self.last_poll = now;
+        if pointer && !self.away_pointer {
+            self.away_pointer = true;
+            self.mouse.set_active(true);
+        }
+        let mut back_to_kiln = self.return_chord.check_elapsed(now) == ChordEvent::EmergencyAbort;
+        let pointing = |m: &MouseController<Box<dyn MouseDriver>>| pointer && m.is_active();
+
+        if let Some(ref mut gilrs) = self.gilrs {
+            while let Some(event) = gilrs.next_event() {
+                use gilrs::{Axis, Button, EventType};
+                match event.event {
+                    EventType::ButtonPressed(button, _) => match button {
+                        Button::LeftThumb => {
+                            back_to_kiln |= self.return_chord.set_back_held(true, now)
+                                == ChordEvent::EmergencyAbort;
+                        }
+                        Button::RightThumb => {
+                            back_to_kiln |= self.return_chord.set_start_held(true, now)
+                                == ChordEvent::EmergencyAbort;
+                        }
+                        Button::Mode if pointer => {
+                            if self.mouse.is_active() {
+                                self.mouse.set_left_click(false);
+                                self.mouse.set_right_click(false);
+                            }
+                            let _ = self.mouse.toggle_active();
+                        }
+                        Button::South if pointing(&self.mouse) => self.mouse.set_left_click(true),
+                        Button::East if pointing(&self.mouse) => self.mouse.set_right_click(true),
+                        Button::RightTrigger if pointing(&self.mouse) => self.mouse.scroll(-120),
+                        Button::LeftTrigger if pointing(&self.mouse) => self.mouse.scroll(120),
+                        _ => {}
+                    },
+                    EventType::ButtonReleased(button, _) => match button {
+                        Button::LeftThumb => {
+                            self.return_chord.set_back_held(false, now);
+                        }
+                        Button::RightThumb => {
+                            self.return_chord.set_start_held(false, now);
+                        }
+                        Button::South if pointing(&self.mouse) => self.mouse.set_left_click(false),
+                        Button::East if pointing(&self.mouse) => self.mouse.set_right_click(false),
+                        _ => {}
+                    },
+                    EventType::AxisChanged(axis, val, _) if pointer => match axis {
+                        Axis::LeftStickX => self.stick_x = val,
+                        Axis::LeftStickY => self.stick_y = val,
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+
+        if pointing(&self.mouse) {
+            self.mouse.update_stick(self.stick_x, self.stick_y, dt);
+        }
+        back_to_kiln
     }
 }
 
@@ -98,6 +199,7 @@ impl Default for GilrsPoller {
 
 impl InputPoller for GilrsPoller {
     fn poll_actions(&mut self, now: Instant) -> Vec<NavAction> {
+        self.service_rumble();
         let dt = now.duration_since(self.last_poll).as_secs_f32();
         self.last_poll = now;
 
@@ -285,6 +387,7 @@ impl InputPoller for FakeInputPoller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mouse::FakeMouseDriver;
     use std::time::Duration;
 
     #[test]
@@ -304,6 +407,23 @@ mod tests {
         let t5 = t0 + Duration::from_secs(5);
         let res5 = poller.poll_actions(t5);
         assert_eq!(res5, vec![NavAction::EmergencyAbort]);
+    }
+
+    #[test]
+    fn away_mode_turns_pointer_on_only_over_launchers() {
+        let mut poller = GilrsPoller::with_mouse_driver(Box::new(FakeMouseDriver::new()));
+        let now = Instant::now();
+        // Game in front: controller left alone, no pointer.
+        assert!(!poller.poll_away(now, false));
+        assert!(!poller.is_mouse_mode());
+        // Launcher in front: pointer comes on.
+        assert!(!poller.poll_away(now, true));
+        assert!(poller.is_mouse_mode());
+        // Window in front changes: everything released, pointer off.
+        poller.suspend(now);
+        assert!(!poller.is_mouse_mode());
+        assert!(!poller.poll_away(now, false));
+        assert!(!poller.is_mouse_mode());
     }
 
     #[test]

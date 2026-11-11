@@ -56,10 +56,10 @@ impl VirtualKeyboard for SystemVirtualKeyboard {
         {
             // Try modern Windows 11 TabTip.exe first
             let tab_tip = r"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe";
-            if std::path::Path::new(tab_tip).exists() {
-                if std::process::Command::new(tab_tip).spawn().is_ok() {
-                    return Ok(());
-                }
+            if std::path::Path::new(tab_tip).exists()
+                && std::process::Command::new(tab_tip).spawn().is_ok()
+            {
+                return Ok(());
             }
             // Fallback to classic osk.exe
             std::process::Command::new("osk.exe").spawn()?;
