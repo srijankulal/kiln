@@ -83,7 +83,7 @@ jobs:
         if: steps.version.outputs.skip != 'true'
       - name: Install system dependencies
         if: steps.version.outputs.skip != 'true'
-        run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip libfontconfig1-dev libfreetype6-dev libudev-dev libasound2-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm nasm ninja-build zip nsis libfontconfig1-dev libfreetype6-dev libudev-dev libasound2-dev pkg-config
       - uses: taiki-e/install-action@v2
         if: steps.version.outputs.skip != 'true'
         with:
@@ -91,6 +91,10 @@ jobs:
 
       - name: Build Windows x64
         if: steps.version.outputs.skip != 'true'
+        env:
+          # Baked into the binaries (kiln-core/src/version.rs): shown in Settings and
+          # compared against GitHub releases by the updater.
+          KILN_VERSION: ${{ steps.version.outputs.tag }}
         run: cargo xwin build --release --locked --target x86_64-pc-windows-msvc
 
       - name: Package
@@ -99,11 +103,16 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
+          OUT=target/x86_64-pc-windows-msvc/release
+          # Installer: what most people should download.
+          makensis -V2 -DVERSION="$TAG" -DSRCDIR="$PWD/$OUT" -DOUTFILE="$PWD/kiln-${TAG}-setup.exe" installer/kiln.nsi
+          # Portable zip: unzip anywhere and run Kiln.exe.
           mkdir -p dist
-          cp target/x86_64-pc-windows-msvc/release/*.exe dist/
-          cp -r scripts dist/scripts || true
-          (cd dist && zip -r "../kiln-${TAG}-windows-x64.zip" .)
-          sha256sum kiln-*.zip > SHA256SUMS.txt
+          cp "$OUT/kiln-shell.exe" dist/Kiln.exe
+          cp "$OUT/kiln-updater.exe" "$OUT/kiln-scan.exe" dist/
+          cp installer/PORTABLE.txt dist/README.txt
+          (cd dist && zip -r "../kiln-${TAG}-windows-x64-portable.zip" .)
+          sha256sum kiln-*-setup.exe kiln-*.zip > SHA256SUMS.txt
 
       - name: Tag commit
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.create_tag == 'true'
@@ -120,4 +129,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-        run: gh release create "$TAG" kiln-*.zip SHA256SUMS.txt --title "Kiln $TAG" --generate-notes --verify-tag
+        run: |
+          cat > notes.md <<EOF
+          ## Download
+
+          **[kiln-${TAG}-setup.exe](https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/kiln-${TAG}-setup.exe)**: run it and Kiln installs for you (no admin needed) with a Start menu shortcut. Already have Kiln? It updates itself from Settings > About.
+
+          No installer? Use the portable zip: extract it and run \`Kiln.exe\`. If Windows shows "Windows protected your PC", choose **More info, then Run anyway** (Kiln isn't code-signed yet).
+          EOF
+          gh release create "$TAG" kiln-*-setup.exe kiln-*.zip SHA256SUMS.txt --title "Kiln $TAG" --notes-file notes.md --generate-notes --verify-tag

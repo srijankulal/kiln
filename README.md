@@ -23,6 +23,20 @@ In normal daily use, a laptop functions as a standard Windows 11 workstation. Wh
 
 ---
 
+## Install
+
+1. Download **`kiln-<version>-setup.exe`** from the [latest release](https://github.com/srijankulal/kiln/releases/latest).
+2. Run it. Kiln installs for your Windows account only (no admin prompt) and adds a Start menu shortcut. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway** (Kiln isn't code-signed yet).
+3. Kiln checks for updates by itself and offers them in **Settings › About**, where the version you're running is shown.
+
+To uninstall, use **Settings › Apps › Installed apps › Kiln › Uninstall**. Your library and settings in `%LOCALAPPDATA%\Kiln` are kept unless you choose to delete them.
+
+Prefer no install? The release also has a portable zip: extract it and run `Kiln.exe`.
+
+Every push to `main` that passes CI is released automatically with the next `0.xxx.xx` version.
+
+---
+
 ## Workspace Architecture
 
 ```
@@ -35,7 +49,8 @@ kiln/
 │   ├── kiln-daemon/     Always-on background supervisor daemon, named pipe IPC server, global hotkeys
 │   ├── kiln-shell/      Fullscreen 10-foot Slint TV UI binary
 │   ├── kiln-auth/       Lightweight on-demand OAuth login pop-up helper
-│   └── kiln-updater/    Rollback-capable self-updater with atomic replacement
+│   └── kiln-updater/    Checks GitHub releases, downloads and runs the installer to update
+├── installer/           NSIS installer script (kiln-<version>-setup.exe) and portable readme
 ├── docs/                Architecture specs and findings
 └── .github/workflows/   Automated CI and release cross-compilation pipeline
 ```

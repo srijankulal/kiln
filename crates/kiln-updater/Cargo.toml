@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Rollback-capable, minisign-verified updater stub for Kiln"
+description = "Checks GitHub releases and installs Kiln updates"
 
 [dependencies]
 kiln-core.workspace = true
@@ -14,6 +14,7 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
 
 [dev-dependencies]
 tempfile.workspace = true

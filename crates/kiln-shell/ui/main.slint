@@ -92,7 +92,15 @@ export component MainWindow inherits Window {
     in-out property <int> kept_apps_count: 0;
     in-out property <string> status_message: "";
     in-out property <int> settings_focus: 0;
-    out property <int> settings_count: 17;
+    out property <int> settings_count: 18;
+
+    // ------------------------------------------------------------ version + updates
+    in-out property <string> app_version: "";
+    // 0 not checked, 1 checking, 2 up to date, 3 available, 4 downloading, 5 installing, 6 failed
+    in-out property <int> update_state: 0;
+    in-out property <string> update_version: "";
+    in-out property <string> update_detail: "";
+    in-out property <float> update_progress: 0.0;
 
     // ------------------------------------------------------------ game folders dialog
     in-out property <[string]> game_folders: [];
@@ -112,6 +120,7 @@ export component MainWindow inherits Window {
     callback clear_kept_apps();
     callback add_game_folder();
     callback remove_game_folder(int);
+    callback update_action(); // check for updates, or install the one found
     callback launch_set_app_close(int, bool);
     callback launch_choose_display(int);
     callback launch_toggle_remember();
@@ -158,7 +167,7 @@ export component MainWindow inherits Window {
     // Rows (index): 0 interface size, 1 text size, 2 tile size, 3 edge margin,
     // 4 theme, 5 accent, 6 font, 7 animations, 8 interface sounds, 9 sound volume,
     // 10 controller, 11 button prompts, 12 vibration, 13 startup screen,
-    // 14 always-kept apps, 15 close launcher, 16 game folders.
+    // 14 always-kept apps, 15 close launcher, 16 game folders, 17 version / updates.
     pure function wrap(v: int, d: int, n: int) -> int {
         if v + d < 0 { return n - 1; }
         if v + d >= n { return 0; }
@@ -263,6 +272,8 @@ export component MainWindow inherits Window {
         } else if index == 16 {
             root.folders_focus = root.game_folders.length;
             root.show_folders = true;
+        } else if index == 17 {
+            root.update_action();
         } else {
             Sfx.play("bump", 0); // sliders change with left/right, not select
         }
@@ -277,7 +288,7 @@ export component MainWindow inherits Window {
     property <length> row-gap: Theme.space-xs;
     property <length> label-h: 32px * Theme.k + 24px * Theme.kt;
     pure function row-y(i: int) -> length {
-        return i * (root.row-h + root.row-gap) + (i < 4 ? 1 : i < 8 ? 2 : i < 10 ? 3 : i < 13 ? 4 : i < 16 ? 5 : 6) * root.label-h;
+        return i * (root.row-h + root.row-gap) + (i < 4 ? 1 : i < 8 ? 2 : i < 10 ? 3 : i < 13 ? 4 : i < 16 ? 5 : i < 17 ? 6 : 7) * root.label-h;
     }
 
     // ------------------------------------------------------------ sounds for state changes
@@ -909,6 +920,28 @@ export component MainWindow inherits Window {
                                 activate => { root.activate-setting(16); }
                                 pointer-entered => { root.settings_focus = 16; }
                             }
+
+                            SectionLabel { text: "ABOUT"; height: root.label-h - root.row-gap; vertical-alignment: bottom; }
+                            SettingRow {
+                                height: root.row-h;
+                                icon: Icons.info;
+                                label: "Kiln version " + root.app_version;
+                                description: root.update_state == 1 ? "Checking for updates…"
+                                    : root.update_state == 2 ? "You have the latest version."
+                                    : root.update_state == 3 ? "Version " + root.update_version + " is available. Kiln restarts to finish."
+                                    : root.update_state == 4 ? "Downloading version " + root.update_version + "…"
+                                    : root.update_state == 5 ? "Installing. Kiln will restart by itself."
+                                    : root.update_state == 6 ? "Couldn't update: " + root.update_detail
+                                    : "Updates are checked automatically.";
+                                kind: 3;
+                                value: root.update_state == 3 ? "Install update"
+                                    : root.update_state == 4 ? root.pct(root.update_progress)
+                                    : root.update_state == 1 || root.update_state == 5 ? "…"
+                                    : "Check for updates";
+                                focused: root.settings_focus == 17;
+                                activate => { root.activate-setting(17); }
+                                pointer-entered => { root.settings_focus = 17; }
+                            }
                         }
                     }
                 }
@@ -933,6 +966,7 @@ export component MainWindow inherits Window {
                             spacing: Theme.space-md;
                             SectionLabel { text: "THIS SCREEN"; }
                             for fact in [
+                                { k: "Kiln version", v: root.app_version },
                                 { k: "Window", v: round(Theme.viewport-width / 1px) + " × " + round(Theme.viewport-height / 1px) },
                                 { k: "Effective scale", v: root.pct(Theme.k) },
                                 { k: "Font", v: Theme.font-preset-names[Theme.font-preset] },

@@ -8,6 +8,7 @@ pub mod journal;
 pub mod models;
 pub mod state;
 pub mod traits;
+pub mod version;
 
 #[cfg(test)]
 mod tests {

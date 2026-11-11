@@ -11,6 +11,7 @@ kiln-core.workspace = true
 kiln-library.workspace = true
 kiln-input.workspace = true
 kiln-sysctl.workspace = true
+kiln-updater.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true

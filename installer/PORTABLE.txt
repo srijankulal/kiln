@@ -1,0 +1,18 @@
+Kiln (portable)
+===============
+
+Run Kiln.exe to start Kiln. Nothing needs installing.
+
+If Windows shows "Windows protected your PC", click "More info", then "Run anyway".
+Kiln isn't code-signed yet.
+
+Prefer a normal install with a Start menu shortcut, an entry in Installed apps and
+automatic updates? Download kiln-<version>-setup.exe from the same release page instead:
+https://github.com/srijankulal/kiln/releases/latest
+
+Your game library and settings are stored in %LOCALAPPDATA%\Kiln, so they carry over
+between the portable and installed versions.
+
+The other files are optional command-line tools:
+  kiln-updater.exe   check for and install updates (--check, --apply)
+  kiln-scan.exe      list the games Kiln finds on this PC

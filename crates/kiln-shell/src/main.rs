@@ -392,6 +392,137 @@ fn main() -> anyhow::Result<()> {
         });
     });
 
+    // ------------------------------------------------------------------ updates
+    // update_state: 0 not checked, 1 checking, 2 up to date, 3 available, 4 downloading,
+    // 5 installing, 6 failed (see the About row in ui/main.slint).
+    ui.set_app_version(SharedString::from(kiln_core::version::display()));
+    let pending_update: Arc<std::sync::Mutex<Option<kiln_updater::Update>>> = Arc::default();
+    let check_updates = {
+        let ui_weak = ui.as_weak();
+        let pending = pending_update.clone();
+        Rc::new(move |manual: bool| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            if matches!(ui.get_update_state(), 1 | 4 | 5) {
+                return;
+            }
+            ui.set_update_state(1);
+            let weak = ui.as_weak();
+            let pending = pending.clone();
+            std::thread::spawn(move || {
+                let result = kiln_updater::check();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    match result {
+                        Ok(Some(update)) => {
+                            println!("Update available: {}", update.version);
+                            ui.set_update_version(SharedString::from(update.version.as_str()));
+                            ui.set_update_state(3);
+                            ui.set_status_message(SharedString::from(format!(
+                                "Kiln {} is available. Install it in Settings.",
+                                update.version
+                            )));
+                            *pending.lock().unwrap() = Some(update);
+                        }
+                        Ok(None) => {
+                            ui.set_update_state(2);
+                            if manual {
+                                ui.set_status_message(SharedString::from("Kiln is up to date"));
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Update check failed: {e:#}");
+                            ui.set_update_detail(SharedString::from(e.to_string()));
+                            ui.set_update_state(6);
+                            if manual {
+                                sfx(&ui, "error", 0);
+                            }
+                        }
+                    }
+                });
+            });
+        })
+    };
+    {
+        let ui_weak = ui.as_weak();
+        let pending = pending_update.clone();
+        let check_updates = check_updates.clone();
+        ui.on_update_action(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            match ui.get_update_state() {
+                1 | 4 | 5 => sfx(&ui, "bump", 0),
+                3 => {
+                    let Some(update) = pending.lock().unwrap().clone() else {
+                        return;
+                    };
+                    sfx(&ui, "confirm", 0);
+                    ui.set_update_progress(0.0);
+                    ui.set_update_state(4);
+                    let weak = ui.as_weak();
+                    std::thread::spawn(move || {
+                        let mut last_pct = -1;
+                        let result = kiln_updater::download(&update, |p| {
+                            let pct = (p * 100.0) as i32;
+                            if pct != last_pct {
+                                last_pct = pct;
+                                let weak = weak.clone();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = weak.upgrade() {
+                                        ui.set_update_progress(p);
+                                    }
+                                });
+                            }
+                        })
+                        .and_then(|installer| kiln_updater::launch_installer(&installer));
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(ui) = weak.upgrade() else { return };
+                            match result {
+                                Ok(()) => {
+                                    // The installer waits for Kiln to close, then restarts it.
+                                    ui.set_update_state(5);
+                                    ui.set_status_message(SharedString::from(
+                                        "Installing the update. Kiln will restart by itself.",
+                                    ));
+                                    let weak = ui.as_weak();
+                                    slint::Timer::single_shot(
+                                        Duration::from_millis(1200),
+                                        move || {
+                                            if let Some(ui) = weak.upgrade() {
+                                                ui.invoke_power_action(SharedString::from("exit"));
+                                            }
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("Update failed: {e:#}");
+                                    sfx(&ui, "error", 0);
+                                    ui.set_update_detail(SharedString::from(e.to_string()));
+                                    ui.set_update_state(6);
+                                    ui.set_status_message(SharedString::from(
+                                        "Couldn't install the update",
+                                    ));
+                                }
+                            }
+                        });
+                    });
+                }
+                _ => check_updates(true),
+            }
+        });
+    }
+    // Check shortly after startup and then every few hours. Local builds only check when
+    // asked, so development doesn't keep offering the latest release.
+    let _update_timer = slint::Timer::default();
+    if !kiln_core::version::is_dev_build() {
+        let first = check_updates.clone();
+        slint::Timer::single_shot(Duration::from_secs(8), move || first(false));
+        let again = check_updates.clone();
+        _update_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(6 * 60 * 60),
+            move || again(false),
+        );
+    }
+
     // ------------------------------------------------------------------ game folders
     let set_folders = {
         let ui_weak = ui.as_weak();

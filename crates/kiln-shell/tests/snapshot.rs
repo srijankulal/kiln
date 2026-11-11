@@ -267,6 +267,16 @@ fn screenshots() {
     shoot("settings-vibration", 1920, 1080);
     ui.set_settings_focus(16);
     shoot("settings-scrolled", 1920, 1080);
+    ui.set_app_version("0.003.05".into());
+    ui.set_settings_focus(17);
+    shoot("settings-about", 1920, 1080);
+    ui.set_update_version("0.003.06".into());
+    ui.set_update_state(3);
+    shoot("settings-update-available", 1920, 1080);
+    ui.set_update_state(4);
+    ui.set_update_progress(0.42);
+    shoot("settings-update-downloading", 1920, 1080);
+    ui.set_update_state(0);
     ui.set_game_folders(ModelRc::new(VecModel::from(vec![
         slint::SharedString::from(r"D:\Games"),
         slint::SharedString::from(r"E:\Emulators\Standalone PC games with a long folder name"),
